@@ -284,7 +284,7 @@ def buy(ctx: click.Context, slug_or_id: str, outcome: str, amount_usd: float, or
 @click.option("--type", "order_type", type=click.Choice(["fok", "fak"]), default="fok")
 @click.pass_context
 def sell(ctx: click.Context, slug_or_id: str, outcome: str, shares: float, order_type: str) -> None:
-    """Sell shares: sell shares, receive USD at market price."""
+    """Sell shares: receive USD at market price."""
     engine = _get_engine(ctx)
     try:
         result = engine.sell(slug_or_id, outcome, shares, order_type)

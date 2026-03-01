@@ -1,14 +1,18 @@
 """Shareable stats cards for social platforms.
 
 Generates formatted trading performance cards optimized for:
-- X/Twitter (280 chars, hashtags, engagement bait)
+- X/Twitter (hashtags, engagement hooks)
 - Chat apps (Telegram, Discord, WhatsApp — markdown)
 - Plain text (fallback)
 
-Templates:
-- performance: overall stats summary (default)
+Card types:
+- tweet: compact stats for X/Twitter
+- card: markdown for chat apps
+- plain: plain text, no formatting
 - milestone: achievement celebration (e.g. "Hit 50 trades!")
-- daily: daily activity report with top movers
+- pk: head-to-head comparison between two accounts
+- leaderboard: top 10 ranking table
+- daily: daily report with top positions
 """
 
 from __future__ import annotations
@@ -50,8 +54,6 @@ def _extract(stats: dict) -> dict:
         "sharpe": stats.get("sharpe_ratio", 0.0),
         "win": stats.get("win_rate", 0.0),
         "trades": stats.get("total_trades", 0),
-        "dd": stats.get("max_drawdown", 0.0),
-        "fees": stats.get("total_fees", 0.0),
         "starting": stats.get("starting_balance", 0.0),
         "icon": _roi_icon(roi),
         "pnl_sign": _sign(pnl),
@@ -106,9 +108,9 @@ def generate_tweet(
     account: str = "default",
     positions: list[dict] | None = None,
 ) -> str:
-    """Generate a tweet-optimized card (< 280 chars).
+    """Generate a tweet-optimized card for X/Twitter.
 
-    Designed for X/Twitter sharing. Compact, eye-catching, with hashtags.
+    Compact, eye-catching, with hashtags and challenge hook.
     """
     s = _extract(stats)
 

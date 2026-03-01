@@ -91,7 +91,9 @@ pm-trader stats
 | `orders list` | Pending limit orders |
 | `orders cancel ID` | Cancel a limit order |
 | `orders check` | Fill limit orders if price crosses |
-| `stats` | Win rate, ROI, profit, max drawdown |
+| `stats [--card\|--tweet\|--plain]` | Win rate, ROI, profit, max drawdown |
+| `leaderboard` | Local account rankings |
+| `pk ACCOUNT_A ACCOUNT_B` | Battle: who's the better trader? |
 | `export trades [--format csv\|json]` | Export trade history |
 | `export positions [--format csv\|json]` | Export positions |
 | `benchmark run MODULE.FUNC` | Run a trading strategy |
@@ -229,7 +231,7 @@ pm-trader benchmark compare aggressive conservative
 Generate a shareable stats card and post to X/Twitter:
 
 ```bash
-pm-trader stats --tweet    # X/Twitter optimized (< 280 chars)
+pm-trader stats --tweet    # X/Twitter optimized
 pm-trader stats --card     # markdown for Telegram/Discord
 pm-trader stats --plain    # plain text
 ```

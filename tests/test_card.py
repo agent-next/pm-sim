@@ -7,6 +7,7 @@ from pm_trader.card import (
     _extract,
     _format_top_positions,
     _roi_icon,
+    _sign,
     _tier,
     generate_card,
     generate_card_plain,
@@ -21,6 +22,26 @@ from pm_trader.card import (
 # ---------------------------------------------------------------------------
 # _roi_icon
 # ---------------------------------------------------------------------------
+
+
+class TestSign:
+    def test_positive(self):
+        assert _sign(10.0) == "+"
+
+    def test_zero(self):
+        assert _sign(0.0) == "+"
+
+    def test_negative_zero(self):
+        assert _sign(-0.0) == "+"
+
+    def test_negative(self):
+        assert _sign(-5.0) == ""
+
+    def test_large(self):
+        assert _sign(1e18) == "+"
+
+    def test_small_negative(self):
+        assert _sign(-1e-15) == ""
 
 
 class TestRoiIcon:
@@ -53,14 +74,20 @@ class TestExtract:
         result = _extract({})
         assert result["roi"] == 0.0
         assert result["pnl"] == 0.0
+        assert result["pnl_abs"] == 0.0
         assert result["trades"] == 0
         assert result["pnl_sign"] == "+"
         assert result["roi_sign"] == "+"
+        assert result["pnl_verb"] == "made"
+        assert result["pnl_noun"] == "profit"
 
     def test_negative_pnl(self):
         result = _extract({"pnl": -500.0, "roi_pct": -10.0})
         assert result["pnl_sign"] == ""
         assert result["roi_sign"] == ""
+        assert result["pnl_abs"] == 500.0
+        assert result["pnl_verb"] == "lost"
+        assert result["pnl_noun"] == "loss"
 
     def test_full_stats(self):
         stats = {
@@ -70,20 +97,19 @@ class TestExtract:
             "sharpe_ratio": 1.8,
             "win_rate": 0.65,
             "total_trades": 42,
-            "max_drawdown": 0.08,
-            "total_fees": 15.50,
             "starting_balance": 10000.0,
         }
         result = _extract(stats)
         assert result["roi"] == 12.5
+        assert result["pnl_abs"] == 1250.0
         assert result["total"] == 11250.0
         assert result["sharpe"] == 1.8
         assert result["win"] == 0.65
         assert result["trades"] == 42
-        assert result["dd"] == 0.08
-        assert result["fees"] == 15.50
         assert result["starting"] == 10000.0
         assert result["icon"] == "\U0001f680"  # 10 < 12.5 < 20
+        assert result["pnl_verb"] == "made"
+        assert result["pnl_noun"] == "profit"
 
 
 # ---------------------------------------------------------------------------
@@ -181,6 +207,7 @@ class TestGenerateTweet:
         assert "10 trades" in tweet
         assert "#Polymarket" in tweet
         assert "#AITrading" in tweet
+        assert "#OpenClaw" in tweet
         assert "clawhub install" in tweet
         assert "Can your agent beat mine?" in tweet
 
@@ -243,6 +270,12 @@ class TestGenerateCard:
         assert "Portfolio: *$11,500.00*" in card
         assert "Can your agent beat mine?" in card
         assert "clawhub" in card
+
+    def test_negative_pnl(self):
+        stats = {"roi_pct": -5.0, "pnl": -500.0, "total_value": 9500.0, "starting_balance": 10000.0}
+        card = generate_card(stats)
+        assert "ROI: *-5.0%*" in card
+        assert "P&L: *$-500.00*" in card
 
     def test_zero_stats(self):
         card = generate_card({})
@@ -342,6 +375,7 @@ class TestGeneratePkCard:
         assert "+8.0%" in card
         assert "alice wins" in card
         assert "Who's the better trader?" in card
+        assert "#OpenClaw" in card
         assert "clawhub" in card
 
     def test_b_wins(self):
@@ -387,6 +421,12 @@ class TestGenerateMilestoneTweet:
         assert "+12.0% ROI" in tweet
         assert "$1,200 profit" in tweet
 
+    def test_negative_pnl(self):
+        stats = {"roi_pct": -8.0, "pnl": -800.0, "total_trades": 10}
+        tweet = generate_milestone_tweet(stats)
+        assert "$800 loss" in tweet
+        assert "-8.0% ROI" in tweet
+
 
 # ---------------------------------------------------------------------------
 # generate_daily_report
@@ -421,6 +461,12 @@ class TestGenerateDailyReport:
     def test_no_positions(self):
         report = generate_daily_report({})
         assert "Top positions:" not in report
+
+    def test_negative_pnl(self):
+        stats = {"roi_pct": -3.0, "pnl": -300.0, "total_value": 9700.0, "total_trades": 5}
+        report = generate_daily_report(stats)
+        assert "-3.0%" in report
+        assert "$-300.00" in report
 
     def test_tier_shown(self):
         stats = {"total_trades": 35, "roi_pct": 12.0, "sharpe_ratio": 1.2}
