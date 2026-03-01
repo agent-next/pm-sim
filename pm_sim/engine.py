@@ -23,6 +23,15 @@ from pm_sim.models import (
     Trade,
     TradeResult,
 )
+from pm_sim.orders import (
+    cancel_order,
+    create_order,
+    expire_orders,
+    get_pending_orders,
+    init_orders_schema,
+    mark_filled,
+    should_fill,
+)
 from pm_sim.orderbook import simulate_buy_fill, simulate_sell_fill
 
 MIN_ORDER_USD = 1.0  # Polymarket minimum order size
@@ -34,6 +43,7 @@ class Engine:
     def __init__(self, data_dir: Path) -> None:
         self.db = Database(data_dir)
         self.db.init_schema()
+        init_orders_schema(self.db.conn)
         self.api = PolymarketClient(self.db)
 
     def close(self) -> None:
@@ -362,6 +372,128 @@ class Engine:
         return self.db.get_trades(limit)
 
     # ------------------------------------------------------------------
+    # Limit orders (GTC / GTD)
+    # ------------------------------------------------------------------
+
+    def place_limit_order(
+        self,
+        slug_or_id: str,
+        outcome: str,
+        side: str,
+        amount: float,
+        limit_price: float,
+        order_type: str = "gtc",
+        expires_at: str | None = None,
+    ) -> dict:
+        """Place a GTC or GTD limit order."""
+        self._require_account()
+        outcome = self._validate_outcome(outcome)
+        if side not in ("buy", "sell"):
+            raise OrderRejectedError(f"Invalid side: {side!r}")
+        if not (0 < limit_price < 1):
+            raise OrderRejectedError(f"Limit price must be between 0 and 1, got {limit_price}")
+
+        market = self.api.get_market(slug_or_id)
+        order = create_order(
+            self.db.conn,
+            market_slug=market.slug,
+            market_condition_id=market.condition_id,
+            outcome=outcome,
+            side=side,
+            amount=amount,
+            limit_price=limit_price,
+            order_type=order_type,
+            expires_at=expires_at,
+        )
+        return _order_to_dict(order)
+
+    def get_pending_orders(self) -> list[dict]:
+        """Return all pending limit orders."""
+        orders = get_pending_orders(self.db.conn)
+        return [_order_to_dict(o) for o in orders]
+
+    def cancel_limit_order(self, order_id: int) -> dict | None:
+        """Cancel a pending limit order."""
+        order = cancel_order(self.db.conn, order_id)
+        if order is None:
+            return None
+        return _order_to_dict(order)
+
+    def check_orders(self) -> list[dict]:
+        """Check all pending orders against live prices and execute fills.
+
+        This is the agent-callable trigger. Call it periodically.
+        Returns list of filled/expired orders.
+        """
+        self._require_account()
+        results = []
+
+        # First expire any GTD orders past their deadline
+        expired = expire_orders(self.db.conn)
+        for o in expired:
+            results.append({"order": _order_to_dict(o), "action": "expired"})
+
+        # Check pending orders against live midpoints
+        pending = get_pending_orders(self.db.conn)
+        for order in pending:
+            try:
+                market = self.api.get_market(order.market_slug)
+                token_id = (
+                    market.yes_token_id if order.outcome == "yes"
+                    else market.no_token_id
+                )
+                mid = self.api.get_midpoint(token_id)
+
+                if should_fill(order, mid):
+                    if order.side == "buy":
+                        trade_result = self.buy(
+                            order.market_slug, order.outcome, order.amount
+                        )
+                    else:
+                        trade_result = self.sell(
+                            order.market_slug, order.outcome, order.amount
+                        )
+                    updated = mark_filled(self.db.conn, order.id)
+                    results.append({
+                        "order": _order_to_dict(updated),
+                        "action": "filled",
+                    })
+            except Exception:
+                continue  # Skip orders that fail (market gone, no liquidity, etc.)
+
+        return results
+
+    def watch_prices(
+        self, slugs_or_ids: list[str], outcomes: list[str] | None = None,
+    ) -> list[dict]:
+        """Fetch live midpoint prices for given markets.
+
+        Agent calls this to monitor prices before deciding to trade.
+        """
+        results = []
+        if outcomes is None:
+            outcomes = ["yes"]
+        for slug in slugs_or_ids:
+            try:
+                market = self.api.get_market(slug)
+                for outcome in outcomes:
+                    outcome = outcome.lower()
+                    token_id = (
+                        market.yes_token_id if outcome == "yes"
+                        else market.no_token_id
+                    )
+                    mid = self.api.get_midpoint(token_id)
+                    results.append({
+                        "market_slug": market.slug,
+                        "outcome": outcome,
+                        "midpoint": mid,
+                        "condition_id": market.condition_id,
+                    })
+            except Exception:
+                continue
+        return results
+
+    # ------------------------------------------------------------------
     # Resolution
     # ------------------------------------------------------------------
 
@@ -442,3 +574,21 @@ def _determine_winner(market) -> str:
         if price >= 0.99:
             return outcome.lower()
     return ""
+
+
+def _order_to_dict(order) -> dict:
+    """Convert a LimitOrder to a JSON-safe dict."""
+    return {
+        "id": order.id,
+        "market_slug": order.market_slug,
+        "market_condition_id": order.market_condition_id,
+        "outcome": order.outcome,
+        "side": order.side,
+        "amount": order.amount,
+        "limit_price": order.limit_price,
+        "order_type": order.order_type,
+        "expires_at": order.expires_at,
+        "status": order.status,
+        "created_at": order.created_at,
+        "filled_at": order.filled_at,
+    }

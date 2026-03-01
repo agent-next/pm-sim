@@ -588,3 +588,115 @@ def benchmark_compare(ctx: click.Context, account_names: tuple[str, ...]) -> Non
             indent=2,
         ))
         sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# Limit order commands
+# ---------------------------------------------------------------------------
+
+@main.group()
+def orders() -> None:
+    """Manage limit orders (GTC/GTD)."""
+    pass
+
+
+@orders.command("place")
+@click.argument("slug_or_id")
+@click.argument("outcome")
+@click.argument("side", type=click.Choice(["buy", "sell"]))
+@click.argument("amount", type=float)
+@click.argument("limit_price", type=float)
+@click.option("--type", "order_type", type=click.Choice(["gtc", "gtd"]), default="gtc")
+@click.option("--expires", "expires_at", default=None, help="ISO timestamp for GTD expiry.")
+@click.pass_context
+def orders_place(
+    ctx: click.Context, slug_or_id: str, outcome: str, side: str,
+    amount: float, limit_price: float, order_type: str, expires_at: str | None,
+) -> None:
+    """Place a limit order: pm-sim orders place SLUG yes buy 100 0.55"""
+    engine = _get_engine(ctx)
+    try:
+        result = engine.place_limit_order(
+            slug_or_id, outcome, side, amount, limit_price,
+            order_type=order_type, expires_at=expires_at,
+        )
+        click.echo(_ok(result))
+    except SimError as e:
+        click.echo(_err(e))
+        sys.exit(1)
+    finally:
+        engine.close()
+
+
+@orders.command("list")
+@click.pass_context
+def orders_list(ctx: click.Context) -> None:
+    """List all pending limit orders."""
+    engine = _get_engine(ctx)
+    try:
+        result = engine.get_pending_orders()
+        click.echo(_ok(result))
+    except SimError as e:
+        click.echo(_err(e))
+        sys.exit(1)
+    finally:
+        engine.close()
+
+
+@orders.command("cancel")
+@click.argument("order_id", type=int)
+@click.pass_context
+def orders_cancel(ctx: click.Context, order_id: int) -> None:
+    """Cancel a pending limit order."""
+    engine = _get_engine(ctx)
+    try:
+        result = engine.cancel_limit_order(order_id)
+        if result is None:
+            click.echo(json.dumps(
+                {"ok": False, "error": f"Order {order_id} not found or not pending", "code": "ORDER_NOT_FOUND"},
+                indent=2,
+            ))
+            sys.exit(1)
+        click.echo(_ok(result))
+    except SimError as e:
+        click.echo(_err(e))
+        sys.exit(1)
+    finally:
+        engine.close()
+
+
+@orders.command("check")
+@click.pass_context
+def orders_check(ctx: click.Context) -> None:
+    """Check pending orders against live prices and execute fills."""
+    engine = _get_engine(ctx)
+    try:
+        results = engine.check_orders()
+        click.echo(_ok(results))
+    except SimError as e:
+        click.echo(_err(e))
+        sys.exit(1)
+    finally:
+        engine.close()
+
+
+# ---------------------------------------------------------------------------
+# Watch command
+# ---------------------------------------------------------------------------
+
+@main.command()
+@click.argument("slugs_or_ids", nargs=-1, required=True)
+@click.option("--outcome", "outcomes", multiple=True, default=["yes"])
+@click.pass_context
+def watch(ctx: click.Context, slugs_or_ids: tuple[str, ...], outcomes: tuple[str, ...]) -> None:
+    """Get live midpoint prices for markets."""
+    engine = _get_engine(ctx)
+    try:
+        engine._require_account()
+        result = engine.watch_prices(list(slugs_or_ids), list(outcomes))
+        click.echo(_ok(result))
+    except SimError as e:
+        click.echo(_err(e))
+        sys.exit(1)
+    finally:
+        engine.close()
