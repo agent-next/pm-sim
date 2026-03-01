@@ -546,6 +546,58 @@ def pk_card(account_a: str = "default", account_b: str = "aggressive") -> str:
 
 
 # ---------------------------------------------------------------------------
+# Leaderboard card tool
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def leaderboard_card(accounts: str = "") -> str:
+    """Generate a Top 10 leaderboard card from all local accounts.
+
+    Ranks all qualified accounts (10+ trades) by ROI%.
+    If accounts is provided (comma-separated), only include those accounts.
+    Otherwise scans all accounts in ~/.pm-trader/.
+    """
+    try:
+        from pm_trader.analytics import compute_stats
+        from pm_trader.card import generate_leaderboard_card
+
+        base = Path.home() / ".pm-trader"
+        if accounts:
+            names = [n.strip() for n in accounts.split(",")]
+        else:
+            if not base.exists():
+                return _ok({"card": "No accounts found.", "entries": []})
+            names = [
+                d.name for d in sorted(base.iterdir())
+                if d.is_dir() and (d / "paper.db").exists()
+            ]
+
+        entries = []
+        for name in names:
+            try:
+                engine = _get_engine(name)
+                acct = engine.get_account()
+                trades = engine.db.get_trades(limit=10_000)
+                portfolio_items = engine.get_portfolio()
+                positions_value = sum(p["current_value"] for p in portfolio_items)
+                result = compute_stats(trades, acct, positions_value)
+                result["account"] = name
+                entries.append(result)
+            except Exception:
+                continue
+
+        # Sort by ROI descending, qualified first
+        qualified = [e for e in entries if e.get("total_trades", 0) >= 10]
+        qualified.sort(key=lambda e: e.get("roi_pct", 0.0), reverse=True)
+
+        card = generate_leaderboard_card(qualified)
+        return _ok({"card": card, "entries": qualified})
+    except Exception as e:
+        return _err(str(e), type(e).__name__)
+
+
+# ---------------------------------------------------------------------------
 # PK battle tool
 # ---------------------------------------------------------------------------
 

@@ -26,6 +26,7 @@ from pm_trader.mcp_server import (
     get_order_book,
     history,
     init_account,
+    leaderboard_card,
     leaderboard_entry,
     list_markets,
     list_orders,
@@ -304,6 +305,41 @@ class TestPkBattle:
             strategy_b="also_bad",
         ))
         assert result["ok"] is False
+
+
+# ---------------------------------------------------------------------------
+# leaderboard_card tool
+# ---------------------------------------------------------------------------
+
+
+class TestLeaderboardCard:
+    def test_no_accounts(self):
+        result = _parse(leaderboard_card())
+        assert result["ok"] is True
+        assert "entries" in result["data"]
+
+    def test_with_accounts(self):
+        init_account(balance=10_000.0, account="trader_a")
+        init_account(balance=10_000.0, account="trader_b")
+        result = _parse(leaderboard_card(accounts="trader_a,trader_b"))
+        assert result["ok"] is True
+        # Neither account has 10+ trades, so qualified list empty
+        assert result["data"]["entries"] == []
+        assert "Top 10" in result["data"]["card"]
+
+    def test_scan_all_accounts(self):
+        # Create accounts so they exist at ~/.pm-trader/<name>
+        init_account(balance=10_000.0, account="scan_a")
+        init_account(balance=10_000.0, account="scan_b")
+        # Call without accounts arg to scan all
+        result = _parse(leaderboard_card(accounts=""))
+        assert result["ok"] is True
+
+    def test_bad_account_skipped(self):
+        init_account(balance=10_000.0, account="good")
+        # "bad" doesn't exist — should be skipped without error
+        result = _parse(leaderboard_card(accounts="good,bad"))
+        assert result["ok"] is True
 
 
 # ---------------------------------------------------------------------------

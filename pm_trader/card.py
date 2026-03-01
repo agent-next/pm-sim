@@ -271,6 +271,41 @@ def generate_milestone_tweet(stats: dict, milestone: str | None = None) -> str:
     return "\n".join(lines)
 
 
+def generate_leaderboard_card(entries: list[dict], title: str = "Top 10 AI Traders") -> str:
+    """Generate a leaderboard ranking card from sorted entries.
+
+    Each entry should have: account, roi_pct, pnl, total_trades, sharpe_ratio.
+    Entries should be pre-sorted by ranking criteria (e.g. ROI desc).
+    """
+    lines = [
+        f"\U0001f3c6 {title}",
+        "",
+        "  #  Account         ROI      P&L     Trades  Tier",
+        "  " + "-" * 52,
+    ]
+
+    for i, e in enumerate(entries[:10], 1):
+        name = e.get("account", "?")[:12]
+        roi = e.get("roi_pct", 0.0)
+        pnl = e.get("pnl", 0.0)
+        trades = e.get("total_trades", 0)
+        tier = _tier(e)
+        sign = "+" if roi >= 0 else ""
+        lines.append(
+            f"  {i:>2}  {name:<14} {sign}{roi:>5.1f}%  ${pnl:>8,.0f}  {trades:>6}  {tier}"
+        )
+
+    lines.extend([
+        "",
+        "Qualify: 10+ trades | Ranked by ROI%",
+        "",
+        "#Polymarket #AITrading #Leaderboard",
+        "npx clawhub install polymarket-paper-trader",
+    ])
+
+    return "\n".join(lines)
+
+
 def generate_daily_report(
     stats: dict,
     positions: list[dict] | None = None,

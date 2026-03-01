@@ -11,6 +11,7 @@ from pm_trader.card import (
     generate_card,
     generate_card_plain,
     generate_daily_report,
+    generate_leaderboard_card,
     generate_milestone_tweet,
     generate_pk_card,
     generate_tweet,
@@ -423,3 +424,57 @@ class TestGenerateDailyReport:
         stats = {"total_trades": 35, "roi_pct": 12.0, "sharpe_ratio": 1.2}
         report = generate_daily_report(stats)
         assert "Gold" in report
+
+
+# ---------------------------------------------------------------------------
+# generate_leaderboard_card
+# ---------------------------------------------------------------------------
+
+
+SAMPLE_ENTRIES = [
+    {"account": "alpha", "roi_pct": 25.0, "pnl": 2500.0, "total_trades": 50, "sharpe_ratio": 2.0},
+    {"account": "bravo", "roi_pct": 15.0, "pnl": 1500.0, "total_trades": 30, "sharpe_ratio": 1.2},
+    {"account": "charlie", "roi_pct": 8.0, "pnl": 800.0, "total_trades": 20, "sharpe_ratio": 0.8},
+]
+
+
+class TestGenerateLeaderboardCard:
+    def test_basic_leaderboard(self):
+        card = generate_leaderboard_card(SAMPLE_ENTRIES)
+        assert "Top 10 AI Traders" in card
+        assert "alpha" in card
+        assert "bravo" in card
+        assert "charlie" in card
+        assert "25.0%" in card
+        assert "#Leaderboard" in card
+        assert "clawhub" in card
+
+    def test_custom_title(self):
+        card = generate_leaderboard_card(SAMPLE_ENTRIES, title="Weekly Champions")
+        assert "Weekly Champions" in card
+
+    def test_ranking_order(self):
+        card = generate_leaderboard_card(SAMPLE_ENTRIES)
+        lines = card.split("\n")
+        # Find rank lines (start with digits after spaces)
+        rank_lines = [l for l in lines if l.strip() and l.strip()[0].isdigit()]
+        assert len(rank_lines) == 3
+        assert "alpha" in rank_lines[0]  # #1
+        assert "bravo" in rank_lines[1]  # #2
+        assert "charlie" in rank_lines[2]  # #3
+
+    def test_empty_entries(self):
+        card = generate_leaderboard_card([])
+        assert "Top 10 AI Traders" in card
+        assert "Qualify:" in card
+
+    def test_tier_shown(self):
+        card = generate_leaderboard_card(SAMPLE_ENTRIES)
+        assert "Diamond" in card  # alpha: 50 trades, 25% ROI, sharpe 2.0
+        assert "Gold" in card     # bravo: 30 trades, 15% ROI, sharpe 1.2
+
+    def test_truncates_at_10(self):
+        many = [{"account": f"bot_{i}", "roi_pct": float(i), "total_trades": 20} for i in range(15, 0, -1)]
+        card = generate_leaderboard_card(many)
+        rank_lines = [l for l in card.split("\n") if l.strip() and l.strip()[0].isdigit()]
+        assert len(rank_lines) == 10
