@@ -5,7 +5,7 @@ Paper trading simulator for Polymarket. Built for AI agents. Python 3.10+, SQLit
 ## Commands
 
 ```bash
-# Tests (504 tests, 100% coverage)
+# Tests (597 tests, 100% coverage)
 python3 -m pytest tests/ -x -q                          # fast, stop on first failure
 python3 -m pytest tests/ -v                              # verbose
 python3 -m pytest tests/ --cov=pm_trader --cov-report=term-missing  # coverage
