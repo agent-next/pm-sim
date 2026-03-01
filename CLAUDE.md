@@ -5,8 +5,8 @@ Paper trading simulator for Polymarket. Built for AI agents. Python 3.10+, SQLit
 ## Commands
 
 ```bash
-# Tests (597 tests, 100% coverage)
-python3 -m pytest tests/ -x -q                          # fast, stop on first failure
+# Tests (607 tests, 100% coverage)
+python3 -m pytest tests/ -x -q -m "not live"            # fast, skip live API tests
 python3 -m pytest tests/ -v                              # verbose
 python3 -m pytest tests/ --cov=pm_trader --cov-report=term-missing  # coverage
 python3 -m pytest tests/test_e2e_live.py -v              # live API (requires network)
@@ -24,7 +24,7 @@ cli.py → engine.py → api.py (Polymarket HTTP)
                    → orderbook.py (fill simulation)
                    → orders.py (limit order state machine)
 
-mcp_server.py → engine.py (same stack, 23 MCP tools)
+mcp_server.py → engine.py (same stack, 26 MCP tools)
 ```
 
 - **Engine** is the orchestrator. All trading logic goes through it.
@@ -57,7 +57,7 @@ mcp_server.py → engine.py (same stack, 23 MCP tools)
 
 ## Testing rules
 
-- **Always run tests after changes**: `python3 -m pytest tests/ -x -q`
+- **Always run tests after changes**: `python3 -m pytest tests/ -x -q -m "not live"`
 - **Update tests in the same pass** as bug fixes or refactors. A change is not done until tests pass.
 - **100% coverage is maintained.** New code must include tests. Use `pragma: no cover` only for `if __name__ == "__main__"` guards.
 - Test files mirror source: `pm_trader/engine.py` → `tests/test_engine.py`

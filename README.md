@@ -250,8 +250,9 @@ npx clawhub install polymarket-paper-trader
 ## Tests
 
 ```bash
-pytest                           # full test suite
-pytest tests/test_e2e_live.py    # live API integration tests
+pytest -m "not live"             # unit + integration (skips live API tests)
+pytest                           # full test suite (requires network)
+pytest tests/test_e2e_live.py    # live API integration tests only
 ```
 
 ## License
