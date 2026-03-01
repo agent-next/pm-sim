@@ -645,3 +645,118 @@ class TestOrderCommandErrors:
         data = _parse(result)
         assert data["ok"] is False
         assert data["code"] == "ORDER_REJECTED"
+
+    def test_orders_list(self, runner, data_dir):
+        _invoke(runner, ["init"], data_dir)
+        result = _invoke(runner, ["orders", "list"], data_dir)
+        data = _parse(result)
+        assert data["ok"] is True
+        assert data["data"] == []
+
+    @patch("pm_sim.engine.PolymarketClient")
+    def test_orders_check(self, MockClient, runner, data_dir):
+        _invoke(runner, ["init"], data_dir)
+        result = _invoke(runner, ["orders", "check"], data_dir)
+        data = _parse(result)
+        assert data["ok"] is True
+
+    def test_orders_cancel_not_found(self, runner, data_dir):
+        _invoke(runner, ["init"], data_dir)
+        result = _invoke(runner, ["orders", "cancel", "999"], data_dir)
+        data = _parse(result)
+        assert data["ok"] is False
+        assert data["code"] == "ORDER_NOT_FOUND"
+
+
+class TestResolveCommands:
+    @patch("pm_sim.engine.PolymarketClient")
+    def test_resolve_all(self, MockClient, runner, data_dir):
+        _invoke(runner, ["init"], data_dir)
+        result = _invoke(runner, ["resolve", "--all"], data_dir)
+        data = _parse(result)
+        assert data["ok"] is True
+
+    def test_resolve_missing_argument(self, runner, data_dir):
+        _invoke(runner, ["init"], data_dir)
+        result = _invoke(runner, ["resolve"], data_dir)
+        data = _parse(result)
+        assert data["ok"] is False
+        assert data["code"] == "MISSING_ARGUMENT"
+
+    @patch("pm_sim.engine.PolymarketClient")
+    def test_resolve_specific_market_error(self, MockClient, runner, data_dir):
+        from pm_sim.models import NoPositionError
+        _invoke(runner, ["init"], data_dir)
+        mock_instance = MockClient.return_value
+        mock_instance.get_market.side_effect = NoPositionError("m", "yes")
+        result = _invoke(runner, ["resolve", "some-market"], data_dir)
+        data = _parse(result)
+        assert data["ok"] is False
+
+
+class TestBenchmarkCompare:
+    def test_compare_missing_account(self, runner, data_dir):
+        result = _invoke(runner, ["benchmark", "compare", "nonexistent"], data_dir)
+        data = _parse(result)
+        assert data["ok"] is False
+        assert data["code"] == "ACCOUNT_NOT_FOUND"
+
+    def test_compare_valid_accounts(self, runner, data_dir):
+        # Create two accounts
+        _invoke(runner, ["--account", "alice", "init", "--balance", "5000"], data_dir)
+        _invoke(runner, ["--account", "bob", "init", "--balance", "10000"], data_dir)
+        result = _invoke(runner, ["benchmark", "compare", "alice", "bob"], data_dir)
+        data = _parse(result)
+        assert data["ok"] is True
+
+
+class TestCliSimErrorPaths:
+    """Test that SimError exceptions in CLI produce proper error JSON."""
+
+    def test_balance_not_initialized(self, runner, data_dir):
+        result = _invoke(runner, ["balance"], data_dir)
+        data = _parse(result)
+        assert data["ok"] is False
+        assert result.exit_code == 1
+
+    def test_portfolio_not_initialized(self, runner, data_dir):
+        result = _invoke(runner, ["portfolio"], data_dir)
+        data = _parse(result)
+        assert data["ok"] is False
+        assert result.exit_code == 1
+
+    def test_history_not_initialized(self, runner, data_dir):
+        result = _invoke(runner, ["history"], data_dir)
+        data = _parse(result)
+        assert data["ok"] is False
+        assert result.exit_code == 1
+
+    @patch("pm_sim.engine.PolymarketClient")
+    def test_markets_list_error(self, MockClient, runner, data_dir):
+        from pm_sim.models import ApiError
+        _invoke(runner, ["init"], data_dir)
+        mock_instance = MockClient.return_value
+        mock_instance.list_markets.side_effect = ApiError("network error")
+        result = _invoke(runner, ["markets", "list"], data_dir)
+        data = _parse(result)
+        assert data["ok"] is False
+
+    @patch("pm_sim.engine.PolymarketClient")
+    def test_markets_search_error(self, MockClient, runner, data_dir):
+        from pm_sim.models import ApiError
+        _invoke(runner, ["init"], data_dir)
+        mock_instance = MockClient.return_value
+        mock_instance.search_markets.side_effect = ApiError("timeout")
+        result = _invoke(runner, ["markets", "search", "bitcoin"], data_dir)
+        data = _parse(result)
+        assert data["ok"] is False
+
+    @patch("pm_sim.engine.PolymarketClient")
+    def test_markets_get_error(self, MockClient, runner, data_dir):
+        from pm_sim.models import ApiError
+        _invoke(runner, ["init"], data_dir)
+        mock_instance = MockClient.return_value
+        mock_instance.get_market.side_effect = ApiError("not found", 404)
+        result = _invoke(runner, ["markets", "get", "nonexistent"], data_dir)
+        data = _parse(result)
+        assert data["ok"] is False
