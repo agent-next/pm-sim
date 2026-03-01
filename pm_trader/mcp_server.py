@@ -378,7 +378,7 @@ def check_orders(account: str = "default") -> str:
 
 @mcp.tool()
 def stats(account: str = "default") -> str:
-    """Get performance analytics: win rate, ROI, profit, risk score."""
+    """Get performance analytics: win rate, ROI, profit, max drawdown."""
     try:
         engine = _get_engine(account)
         from pm_trader.analytics import compute_stats

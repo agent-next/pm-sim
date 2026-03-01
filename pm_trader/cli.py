@@ -373,7 +373,7 @@ def resolve(ctx: click.Context, slug_or_id: str | None, resolve_all: bool) -> No
 @click.option("--tweet", is_flag=True, default=False, help="X/Twitter optimized card.")
 @click.pass_context
 def stats(ctx: click.Context, card: bool, plain: bool, tweet: bool) -> None:
-    """Show performance analytics (win rate, ROI, profit, risk score)."""
+    """Show performance analytics (win rate, ROI, profit, max drawdown)."""
     from pm_trader.analytics import compute_stats
 
     engine = _get_engine(ctx)

@@ -102,7 +102,7 @@ def generate_tweet(
     s = _extract(stats)
 
     lines = [
-        f"{s['icon']} My AI agent made {s['pnl_sign']}${s['pnl']:,.0f} trading Polymarket",
+        f"{s['icon']} My AI agent {'made' if s['pnl'] >= 0 else 'lost'} ${abs(s['pnl']):,.0f} trading Polymarket",
         "",
         f"{s['roi_sign']}{s['roi']:.1f}% ROI | {s['win'] * 100:.0f}% win rate | {s['trades']} trades",
         "Zero risk. Real prices.",
@@ -263,7 +263,7 @@ def generate_milestone_tweet(stats: dict, milestone: str | None = None) -> str:
     lines = [
         f"\U0001f3c6 {ms}",
         "",
-        f"{s['pnl_sign']}${s['pnl']:,.0f} profit | {s['roi_sign']}{s['roi']:.1f}% ROI | {s['win'] * 100:.0f}% win rate",
+        f"${abs(s['pnl']):,.0f} {'profit' if s['pnl'] >= 0 else 'loss'} | {s['roi_sign']}{s['roi']:.1f}% ROI | {s['win'] * 100:.0f}% win rate",
         "",
         f"Tier: {_tier(stats)}",
         "Zero risk. Real Polymarket prices.",

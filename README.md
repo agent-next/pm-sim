@@ -91,7 +91,7 @@ pm-trader stats
 | `orders list` | Pending limit orders |
 | `orders cancel ID` | Cancel a limit order |
 | `orders check` | Fill limit orders if price crosses |
-| `stats` | Win rate, ROI, profit, risk score |
+| `stats` | Win rate, ROI, profit, max drawdown |
 | `export trades [--format csv\|json]` | Export trade history |
 | `export positions [--format csv\|json]` | Export positions |
 | `benchmark run MODULE.FUNC` | Run a trading strategy |
@@ -143,7 +143,7 @@ Add to your Claude Code config:
 | `list_orders` | Pending limit orders |
 | `cancel_order` | Cancel a pending order |
 | `check_orders` | Execute pending orders against live prices |
-| `stats` | Win rate, ROI, profit, risk score |
+| `stats` | Win rate, ROI, profit, max drawdown |
 | `resolve` | Resolve a closed market (winners get $1/share) |
 | `resolve_all` | Resolve all closed markets |
 | `backtest` | Backtest a strategy against historical snapshots |

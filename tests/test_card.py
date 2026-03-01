@@ -176,7 +176,7 @@ class TestGenerateTweet:
     def test_basic_tweet(self):
         stats = {"roi_pct": 25.0, "pnl": 2500.0, "total_trades": 10}
         tweet = generate_tweet(stats)
-        assert "+$2,500 trading Polymarket" in tweet
+        assert "made $2,500 trading Polymarket" in tweet
         assert "+25.0% ROI" in tweet
         assert "10 trades" in tweet
         assert "#Polymarket" in tweet
@@ -187,7 +187,7 @@ class TestGenerateTweet:
     def test_negative_roi(self):
         stats = {"roi_pct": -8.0, "pnl": -800.0}
         tweet = generate_tweet(stats)
-        assert "$-800 trading Polymarket" in tweet
+        assert "lost $800 trading Polymarket" in tweet
         assert "-8.0% ROI" in tweet
 
     def test_under_280_chars(self):
@@ -385,7 +385,7 @@ class TestGenerateMilestoneTweet:
         stats = {"roi_pct": 12.0, "pnl": 1200.0, "total_trades": 50, "sharpe_ratio": 1.5}
         tweet = generate_milestone_tweet(stats)
         assert "+12.0% ROI" in tweet
-        assert "+$1,200 profit" in tweet
+        assert "$1,200 profit" in tweet
 
 
 # ---------------------------------------------------------------------------
