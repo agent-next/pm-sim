@@ -760,3 +760,43 @@ class TestCliSimErrorPaths:
         result = _invoke(runner, ["markets", "get", "nonexistent"], data_dir)
         data = _parse(result)
         assert data["ok"] is False
+
+    @patch("pm_sim.engine.PolymarketClient")
+    def test_price_error(self, MockClient, runner, data_dir):
+        from pm_sim.models import ApiError
+        _invoke(runner, ["init"], data_dir)
+        mock_instance = MockClient.return_value
+        mock_instance.get_market.side_effect = ApiError("fail")
+        result = _invoke(runner, ["price", "nonexistent"], data_dir)
+        data = _parse(result)
+        assert data["ok"] is False
+        assert result.exit_code == 1
+
+    @patch("pm_sim.engine.PolymarketClient")
+    def test_book_error(self, MockClient, runner, data_dir):
+        from pm_sim.models import ApiError
+        _invoke(runner, ["init"], data_dir)
+        mock_instance = MockClient.return_value
+        mock_instance.get_market.side_effect = ApiError("fail")
+        result = _invoke(runner, ["book", "nonexistent"], data_dir)
+        data = _parse(result)
+        assert data["ok"] is False
+        assert result.exit_code == 1
+
+    def test_benchmark_run_error(self, runner, data_dir):
+        result = _invoke(runner, ["benchmark", "run", "bad_module"], data_dir)
+        data = _parse(result)
+        assert data["ok"] is False
+        assert data["code"] == "BENCHMARK_ERROR"
+
+    def test_export_trades_not_initialized(self, runner, data_dir):
+        result = _invoke(runner, ["export", "trades"], data_dir)
+        data = _parse(result)
+        assert data["ok"] is False
+        assert result.exit_code == 1
+
+    def test_export_positions_not_initialized(self, runner, data_dir):
+        result = _invoke(runner, ["export", "positions"], data_dir)
+        data = _parse(result)
+        assert data["ok"] is False
+        assert result.exit_code == 1
