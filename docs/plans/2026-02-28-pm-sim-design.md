@@ -1,22 +1,37 @@
 # pm-sim — Polymarket Paper Trading Simulator
 
 **Date:** 2026-02-28
-**Status:** Approved
+**Status:** Approved (v2 — 1:1 faithful execution)
 **Author:** Claude + Robert
 
 ## 1. Overview
 
-A CLI paper trading simulator for Polymarket, designed specifically for AI agents.
+A CLI paper trading simulator for Polymarket, designed for AI agent benchmarking.
 Agents call `pm-sim` via shell commands and receive JSON responses. No wallet, no
-real money, no blockchain — just real market data + local simulated trades in SQLite.
+real money — but execution matches real Polymarket EXACTLY.
 
 ### Core Principles
 
+- **1:1 faithful**: Order book execution, real fees, real slippage — no shortcuts
+- **Agent benchmark**: Multiple agents each get $10k, compare real-world-equivalent results
 - **Agent-first**: All output is JSON by default, machine-parseable
 - **Zero wallet**: Only uses Polymarket public APIs (Gamma + CLOB), no authentication
-- **Real data**: Trades execute at live midpoint prices from Polymarket order books
 - **Auditable**: Every trade logged in SQLite with full provenance
-- **Minimal deps**: Only `click`, `httpx`, `sqlite3` (stdlib)
+
+### What "1:1 Faithful" Means
+
+| Aspect | Our Simulator | Real Polymarket | Match? |
+|--------|--------------|-----------------|:------:|
+| Execution price | Walk real order book level-by-level | Walk real order book | YES |
+| Slippage | Based on actual book depth | Based on actual book depth | YES |
+| Fees | Fetched per-market from `/fee-rate` | Per-market fee_rate_bps | YES |
+| Fee formula | `(bps/10000) * min(p, 1-p) * size` | Same formula | YES |
+| Order types | FOK (all-or-nothing), FAK (partial) | FOK, FAK, GTC, GTD | Subset |
+| Buy semantics | Amount in USD → receive shares | Same | YES |
+| Sell semantics | Amount in shares → receive USD | Same | YES |
+| Tick size | Enforced per-market | Enforced per-market | YES |
+| Min order size | Enforced | Enforced | YES |
+| Resolution | Payout $1/share for winning outcome | Same | YES |
 
 ## 2. Architecture
 
@@ -26,113 +41,82 @@ Agent (LLM / script / OpenClaw / Claude Code)
     ▼
 pm-sim CLI (Click)
     │
-    ├── cli.py       ─── Command definitions, JSON formatting
-    ├── engine.py    ─── Trade execution, P&L, portfolio logic
-    ├── api.py       ─── Polymarket HTTP client (Gamma + CLOB)
-    ├── db.py        ─── SQLite operations, schema, migrations
-    └── models.py    ─── Dataclasses (Market, Trade, Position)
+    ├── cli.py         ─── Command definitions, JSON envelope
+    ├── engine.py      ─── Trade execution: order book walk, fee calc, P&L
+    ├── orderbook.py   ─── Order book simulation: fill logic, slippage calc
+    ├── api.py         ─── Polymarket HTTP client (Gamma + CLOB)
+    ├── db.py          ─── SQLite operations, schema
+    └── models.py      ─── Dataclasses (Market, Trade, Position, Fill)
     │
-    ├── Data flow: read  ─→ HTTP GET to Polymarket API (with 5min cache)
-    └── Data flow: write ─→ SQLite at ~/.pm-sim/paper.db
+    ├── Read  ─→ HTTP GET Polymarket API (market data cached 5min, prices NEVER cached)
+    └── Write ─→ SQLite at ~/.pm-sim/paper.db
 ```
 
-### Data Source: Direct HTTP to Polymarket REST API
-
-- **Gamma API** (`https://gamma-api.polymarket.com`): Market discovery, metadata
-- **CLOB API** (`https://clob.polymarket.com`): Prices, order books, spreads
-- All endpoints are public, no authentication required
-- Market data cached in SQLite for 5 minutes to reduce API calls
-- Prices for buy/sell always fetched real-time (never cached)
-
-### Why not pmxt / Polymarket CLI?
-
-| Factor | Direct HTTP | pmxt SDK | Polymarket CLI |
-|--------|:-----------:|:--------:|:--------------:|
-| Dependencies | httpx only | Node.js sidecar | Rust binary |
-| Install | `pip install` | `pip install` + npm | `brew install` |
-| Latency | ~200ms | ~300ms (sidecar hop) | ~500ms (subprocess) |
-| Stability | Years of API | 3 months old | 4 days old |
-| Control | Full | Framework-mediated | stdout parsing |
-
 ## 3. CLI Interface
-
-### Global Flags
 
 ```
 pm-sim [--data-dir PATH] [--output json|table] <command>
 ```
 
-- `--data-dir`: SQLite location (default: `~/.pm-sim/`)
-- `--output`: Output format (default: `json` for agent-friendliness)
-
-### Commands
-
-#### Account Management
+### Account Management
 
 ```bash
-pm-sim init [--balance 10000] [--fee-bps 0]   # Initialize paper account
-pm-sim balance                                  # Show current cash balance
-pm-sim reset [--confirm]                        # Wipe all data, start fresh
+pm-sim init [--balance 10000]              # Initialize paper account
+pm-sim balance                              # Show cash + total value
+pm-sim reset [--confirm]                    # Wipe all data
 ```
 
-#### Market Data (cached, read-only from Polymarket)
+### Market Data
 
 ```bash
-pm-sim markets list [--limit 20] [--active] [--sort volume|liquidity]
+pm-sim markets list [--limit 20] [--sort volume|liquidity]
 pm-sim markets search <query> [--limit 10]
-pm-sim markets get <slug-or-id>
-pm-sim price <slug-or-id>                       # YES/NO midpoints
-pm-sim book <slug-or-id>                        # Top 5 bids/asks
-pm-sim sync                                     # Pre-warm cache
+pm-sim markets get <slug-or-id>             # Full detail incl. fee rate, tick size
+pm-sim price <slug-or-id>                   # YES/NO midpoints + spread
+pm-sim book <slug-or-id> [--depth 10]       # Order book with depth
+pm-sim sync                                 # Pre-warm cache
 ```
 
-#### Trading (local simulation)
+### Trading (1:1 faithful simulation)
 
 ```bash
-pm-sim buy <slug-or-id> <yes|no> <amount-usd>
-pm-sim sell <slug-or-id> <yes|no> <amount-usd>
+# BUY: spend USD, receive shares (walks ask side of book)
+pm-sim buy <slug-or-id> <yes|no> <amount-usd> [--type fok|fak]
+
+# SELL: sell shares, receive USD (walks bid side of book)
+pm-sim sell <slug-or-id> <yes|no> <shares> [--type fok|fak]
 ```
 
-- `buy`: Spend $amount to buy shares at current midpoint price
-- `sell`: Sell $amount worth of shares you own (no shorting)
-- Attempting to sell without a position → `NO_POSITION` error
-- Attempting to buy in a closed market → `MARKET_CLOSED` error
+**Key: buy amount is in USD, sell amount is in SHARES** — matches Polymarket exactly.
 
-#### Portfolio & History
+- `--type fok` (default): Fill entire order or cancel (all-or-nothing)
+- `--type fak`: Fill what's available, cancel remainder (partial fills)
+
+### Portfolio & History
 
 ```bash
-pm-sim portfolio                                # All positions + unrealized P&L
-pm-sim history [--limit 50]                     # Trade log
-pm-sim performance                              # Phase 2: stats
+pm-sim portfolio                            # Positions + unrealized P&L (live prices)
+pm-sim history [--limit 50]                 # Trade log with fill details
+pm-sim performance                          # Win rate, P&L, Sharpe, drawdown
 ```
 
-#### Market Resolution
+### Market Resolution
 
 ```bash
-pm-sim resolve <slug-or-id>                     # Check & settle one market
-pm-sim resolve --all                            # Check & settle all positions
+pm-sim resolve <slug-or-id>                 # Settle one market
+pm-sim resolve --all                        # Settle all resolved markets
 ```
 
 ### JSON Output Format
 
-All commands return a consistent envelope:
-
 ```json
-// Success
 {"ok": true, "data": { ... }}
-
-// Error
-{"ok": false, "error": "Insufficient balance", "code": "INSUFFICIENT_BALANCE"}
+{"ok": false, "error": "...", "code": "INSUFFICIENT_BALANCE"}
 ```
 
-**Error codes:**
-- `NOT_INITIALIZED` — Account not yet created (run `pm-sim init`)
-- `INSUFFICIENT_BALANCE` — Not enough cash for this trade
-- `MARKET_NOT_FOUND` — Slug/ID doesn't match any market
-- `MARKET_CLOSED` — Market is no longer active
-- `NO_POSITION` — Trying to sell shares you don't own
-- `INVALID_OUTCOME` — Outcome must be "yes" or "no"
-- `API_ERROR` — Polymarket API returned an error or is unreachable
+Error codes: `NOT_INITIALIZED`, `INSUFFICIENT_BALANCE`, `MARKET_NOT_FOUND`,
+`MARKET_CLOSED`, `NO_POSITION`, `INVALID_OUTCOME`, `ORDER_REJECTED` (insufficient
+liquidity for FOK), `TICK_SIZE_VIOLATION`, `API_ERROR`
 
 ## 4. Data Model
 
@@ -143,7 +127,6 @@ CREATE TABLE account (
     id INTEGER PRIMARY KEY DEFAULT 1,
     starting_balance REAL NOT NULL DEFAULT 10000,
     cash REAL NOT NULL DEFAULT 10000,
-    fee_bps INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     CHECK (id = 1)
 );
@@ -155,10 +138,16 @@ CREATE TABLE trades (
     market_question TEXT NOT NULL,
     outcome TEXT NOT NULL CHECK (outcome IN ('yes', 'no')),
     side TEXT NOT NULL CHECK (side IN ('buy', 'sell')),
-    price REAL NOT NULL,
-    amount_usd REAL NOT NULL,
-    shares REAL NOT NULL,
-    fee REAL NOT NULL DEFAULT 0,
+    order_type TEXT NOT NULL DEFAULT 'fok' CHECK (order_type IN ('fok', 'fak')),
+    -- Execution details (1:1 match to what Polymarket would do)
+    avg_price REAL NOT NULL,         -- Volume-weighted avg across filled levels
+    amount_usd REAL NOT NULL,        -- USD spent (buy) or received before fee (sell)
+    shares REAL NOT NULL,            -- Shares received (buy) or sold (sell)
+    fee_rate_bps INTEGER NOT NULL,   -- Actual market fee rate
+    fee REAL NOT NULL DEFAULT 0,     -- Actual fee charged
+    slippage REAL NOT NULL DEFAULT 0,-- Difference from midpoint in bps
+    levels_filled INTEGER NOT NULL DEFAULT 1, -- How many book levels consumed
+    is_partial INTEGER NOT NULL DEFAULT 0,    -- FAK partial fill?
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -183,23 +172,9 @@ CREATE TABLE market_cache (
 );
 ```
 
-### Key Design Decisions
+## 5. Execution Model — 1:1 Faithful
 
-**Internal ID: `condition_id`** — Market slugs are user-facing convenience.
-Internally everything keys on `condition_id` (stable, on-chain identifier).
-First use of a slug auto-resolves to `condition_id` via Gamma API and caches the mapping.
-
-**Positions table as materialized view** — Could be computed from trades,
-but caching in a table avoids O(n) scans on every `portfolio` call.
-Updated transactionally with each trade.
-
-**Prices as floats** — Polymarket prices are 0.00–1.00 with 4 decimal precision.
-Python float64 has 15+ significant digits, more than sufficient.
-We do NOT use Decimal to keep the code simple.
-
-## 5. Execution Model
-
-### Buy Flow
+### BUY Flow (amount in USD)
 
 ```
 Input: pm-sim buy "bitcoin-100k" yes 100
@@ -207,170 +182,237 @@ Input: pm-sim buy "bitcoin-100k" yes 100
 1. Validate account exists
 2. Resolve "bitcoin-100k" → condition_id + token_ids (cached)
 3. Check market is active (not closed)
-4. Fetch real-time midpoint for YES token via CLOB API
-   → midpoint = 0.65
-5. Calculate:
-   shares = amount / price = 100 / 0.65 = 153.846...
-   fee = fee_bps/10000 * min(price, 1-price) * amount
-       = 0 (default 0 bps)
-   total_cost = amount + fee = 100.00
-6. Check cash >= total_cost
-7. SQLite transaction:
-   - UPDATE account SET cash = cash - 100.00
-   - INSERT INTO trades (...)
-   - UPSERT positions: shares += 153.85, recalc avg_entry_price
-8. Return JSON:
-   {"ok": true, "data": {
-     "trade_id": 1,
-     "market": "bitcoin-100k",
-     "outcome": "yes",
-     "side": "buy",
-     "price": 0.65,
-     "shares": 153.85,
-     "amount_usd": 100.00,
-     "fee": 0.00,
-     "cash_remaining": 9900.00
-   }}
+4. Fetch REAL order book for YES token: GET /book?token_id=X
+5. Fetch REAL fee rate: GET /fee-rate?token_id=X → e.g. 0 bps
+6. Fetch tick size: GET /tick-size?token_id=X
+7. Walk ASK side of order book to fill $100:
+
+   Book asks:
+   Level 1: price=0.66, size=200 shares → can buy 151.52 shares for $100
+   (If $100 fills within level 1, done. Otherwise continue to level 2, 3...)
+
+   Example multi-level fill:
+   Level 1: 0.66 × 80 shares  = $52.80    (80 shares available)
+   Level 2: 0.67 × 70.45 shares = $47.20  (fill remaining $47.20)
+   Total: 150.45 shares for $100.00
+   Avg price: 100 / 150.45 = 0.6647
+
+8. Calculate fee: (0/10000) * min(0.6647, 0.3353) * 100 = $0.00
+   (or for 200bps market: 0.02 * 0.3353 * 100 = $0.67)
+9. Check cash >= amount + fee
+10. FOR FOK: if book depth < amount, REJECT entirely
+    FOR FAK: fill whatever is available, return partial
+11. Record trade with: avg_price, actual shares, fee, slippage, levels_filled
+12. Update position with actual execution details
 ```
 
-### Sell Flow
+### SELL Flow (amount in SHARES)
 
 ```
-Input: pm-sim sell "bitcoin-100k" yes 50
+Input: pm-sim sell "bitcoin-100k" yes 100  (sell 100 shares)
 
-1-4. Same as buy (resolve, validate, fetch price)
-   → midpoint = 0.70 (price went up)
-5. Check position exists and has enough shares
-   shares_to_sell = amount / price = 50 / 0.70 = 71.43
-   position has 153.85 shares → OK
-6. Calculate realized P&L for sold portion:
-   realized = shares_to_sell * (sell_price - avg_entry_price)
-            = 71.43 * (0.70 - 0.65) = 3.57
-7. SQLite transaction:
-   - UPDATE account SET cash = cash + 50.00
-   - INSERT INTO trades (side='sell', ...)
-   - UPDATE positions: shares -= 71.43, realized_pnl += 3.57
-8. Return JSON with trade details
+1-3. Same validation
+4. Fetch REAL order book for YES token
+5. Walk BID side of order book to sell 100 shares:
+
+   Book bids:
+   Level 1: price=0.64, size=150 shares → sell 100 shares at $0.64
+   Proceeds: 100 * 0.64 = $64.00
+
+   Multi-level example:
+   Level 1: 0.64 × 60 shares  = $38.40
+   Level 2: 0.63 × 40 shares  = $25.20
+   Total: $63.60 for 100 shares
+   Avg price: 63.60 / 100 = 0.636
+
+6. Fee: (bps/10000) * min(0.636, 0.364) * 100_shares = ...
+7. Net proceeds = gross - fee
+8. FOR FOK: if book depth < shares, REJECT
+   FOR FAK: sell what's available
+9. Update cash += net_proceeds
+10. Update position: shares -= sold, recalc realized P&L
 ```
 
-### Resolution Flow
+### Resolution Flow (unchanged)
 
 ```
-Input: pm-sim resolve "bitcoin-100k"
-
-1. Fetch market data from Gamma API
-2. Check if market.closed == true AND outcomePrices settled
-   → outcomePrices = ["1.00", "0.00"] means YES won
-3. For each position in this market:
-   - YES shares: payout = shares * 1.00
-   - NO shares: payout = shares * 0.00
-4. SQLite transaction:
-   - UPDATE account SET cash += total_payout
-   - UPDATE positions SET is_resolved = 1, realized_pnl = payout - total_cost
-5. Return JSON with settlement details
+1. Fetch market, check closed + outcomePrices settled
+2. Winning outcome gets $1.00/share, losing gets $0.00/share
+3. Update cash, mark positions resolved
 ```
 
-### Portfolio Calculation
+## 6. Order Book Simulation Engine (orderbook.py)
+
+The core differentiator. This module walks the real order book exactly as
+Polymarket's matching engine would.
+
+```python
+@dataclass
+class FillResult:
+    filled: bool           # True if order fully filled (FOK satisfied)
+    avg_price: float       # Volume-weighted average fill price
+    total_cost: float      # Total USD spent (buy) or received (sell)
+    total_shares: float    # Total shares received (buy) or sold (sell)
+    fee: float             # Fee charged
+    slippage_bps: float    # Slippage from midpoint in basis points
+    levels_filled: int     # Number of book levels consumed
+    is_partial: bool       # True if FAK partial fill
+    fills: list[Fill]      # Per-level fill details
+
+@dataclass
+class Fill:
+    price: float
+    shares: float
+    cost: float
+    level: int
+```
+
+### Fill Algorithm for BUY (walk asks):
 
 ```
-Input: pm-sim portfolio
+remaining_usd = amount
+fills = []
+for level in asks (sorted low to high):
+    max_shares_at_level = level.size
+    max_cost_at_level = max_shares_at_level * level.price
+    if max_cost_at_level <= remaining_usd:
+        # consume entire level
+        fills.append(Fill(price=level.price, shares=level.size, cost=max_cost_at_level))
+        remaining_usd -= max_cost_at_level
+    else:
+        # partial level fill
+        shares = remaining_usd / level.price
+        fills.append(Fill(price=level.price, shares=shares, cost=remaining_usd))
+        remaining_usd = 0
+        break
 
-1. Fetch all open positions (is_resolved = 0)
-2. For each position, fetch current midpoint price (batch if possible)
-3. Calculate:
-   current_value = shares * current_price
-   unrealized_pnl = current_value - total_cost
-   percent_pnl = unrealized_pnl / total_cost * 100
-4. Return JSON array of positions + summary
+if FOK and remaining_usd > 0: REJECT
+if FAK: return partial fill
 ```
 
-## 6. Polymarket API Integration
+### Fill Algorithm for SELL (walk bids):
 
-### Endpoints Used
+```
+remaining_shares = shares_to_sell
+fills = []
+for level in bids (sorted high to low):
+    if level.size <= remaining_shares:
+        cost = level.size * level.price
+        fills.append(Fill(price=level.price, shares=level.size, cost=cost))
+        remaining_shares -= level.size
+    else:
+        cost = remaining_shares * level.price
+        fills.append(Fill(price=level.price, shares=remaining_shares, cost=cost))
+        remaining_shares = 0
+        break
+
+if FOK and remaining_shares > 0: REJECT
+if FAK: return partial fill
+```
+
+## 7. Fee Model — Real Per-Market Rates
+
+**No configurable fee override.** Simulator fetches the REAL `fee_rate_bps` from
+Polymarket's CLOB API for each market at trade time.
+
+```
+GET https://clob.polymarket.com/fee-rate?token_id={token_id}
+→ {"fee_rate_bps": 0}  (most markets)
+→ {"fee_rate_bps": 250} (crypto 15-min markets)
+→ {"fee_rate_bps": 175} (sports markets)
+```
+
+Formula (Polymarket exact):
+```
+fee = (fee_rate_bps / 10000) * min(price, 1 - price) * size
+```
+
+Where `size`:
+- BUY: amount in USD
+- SELL: amount in shares
+
+Fee is:
+- Deducted from cash on BUY (cash_out = amount + fee)
+- Deducted from proceeds on SELL (cash_in = proceeds - fee)
+
+## 8. Polymarket API Endpoints
 
 | Endpoint | Purpose | Cache? |
 |----------|---------|--------|
-| `GET /markets?slug=X` | Resolve slug → market data | 5 min |
-| `GET /markets?limit=N` | List markets | 5 min |
-| `GET /markets?_q=X` | Search markets | 5 min |
-| `GET /midpoint?token_id=X` | Current price | Never |
-| `GET /book?token_id=X` | Order book | Never |
-| `GET /price-history?...` | Historical prices | 5 min |
+| `GET gamma/markets?slug=X` | Resolve slug → market data | 5 min |
+| `GET gamma/markets?limit=N` | List markets | 5 min |
+| `GET gamma/markets?_q=X` | Search markets | 5 min |
+| `GET clob/midpoint?token_id=X` | Current midpoint | Never |
+| `GET clob/book?token_id=X` | **Full order book** | **Never** |
+| `GET clob/fee-rate?token_id=X` | **Market fee rate** | 5 min |
+| `GET clob/tick-size?token_id=X` | **Market tick size** | 5 min |
+| `GET clob/neg-risk?token_id=X` | Neg-risk flag | 5 min |
+| `GET clob/price-history?...` | Historical prices | 5 min |
 
-### Rate Limits
+## 9. Project Structure
 
-- Free tier: ~1000 calls/hour
-- With 5-minute cache, typical agent session uses <50 calls/hour
-- `sync` command pre-warms cache in bulk
-
-### Error Handling
-
-- Network errors → retry once with 2s backoff, then `API_ERROR`
-- 429 Too Many Requests → `API_ERROR` with rate limit message
-- Invalid slug → `MARKET_NOT_FOUND`
-
-## 7. Fee Model
-
-Default: 0 bps (no fees). Configurable at init time.
-
-When `fee_bps > 0`, fees follow Polymarket's formula:
 ```
-fee = (fee_bps / 10000) * min(price, 1 - price) * amount
+polymarket/
+├── pm_sim/
+│   ├── __init__.py
+│   ├── cli.py          # Click CLI, JSON envelope
+│   ├── engine.py       # Trade orchestration, portfolio, resolve
+│   ├── orderbook.py    # Order book fill simulation (core)
+│   ├── api.py          # Polymarket HTTP client
+│   ├── db.py           # SQLite operations
+│   └── models.py       # All dataclasses + error types
+├── tests/
+│   ├── conftest.py     # Fixtures: sample markets, order books
+│   ├── test_orderbook.py  # Fill algorithm tests (most critical)
+│   ├── test_engine.py
+│   ├── test_api.py
+│   ├── test_db.py
+│   └── test_cli.py
+├── pyproject.toml
+└── README.md
 ```
 
-This means:
-- At price 0.50 (maximum uncertainty): fee is highest
-- At price 0.01 or 0.99 (near-certain): fee is near zero
-- Fees deducted from cash on buy, deducted from proceeds on sell
+## 10. Roadmap
 
-## 8. Roadmap
+### Phase 1 — 1:1 Faithful MVP (Current)
 
-### Phase 1 — MVP (Current)
+- [ ] Project scaffolding + models
+- [ ] SQLite database layer
+- [ ] Polymarket API client (Gamma + CLOB + fee-rate + tick-size)
+- [ ] **Order book fill engine** (walk book, slippage, FOK/FAK)
+- [ ] Trade engine (buy/sell/portfolio/resolve using real book execution)
+- [ ] CLI commands
+- [ ] Integration tests with realistic order book fixtures
+- [ ] README
 
-Core paper trading for a single agent.
+### Phase 2 — Benchmarking & Analytics
 
-- [ ] Project scaffolding (pyproject.toml, structure)
-- [ ] SQLite schema + db.py operations
-- [ ] Polymarket API client (api.py) with caching
-- [ ] Trade engine (engine.py): buy, sell, portfolio, resolve
-- [ ] CLI commands (cli.py): all Phase 1 commands
-- [ ] JSON output envelope
-- [ ] Error handling with codes
-- [ ] Unit tests for engine + API mocking
-- [ ] README with agent usage examples
+- [ ] `performance` command (win rate, P&L, Sharpe, max drawdown)
+- [ ] Multi-account support (`--account agent-a`)
+- [ ] Benchmark harness (run N agents, compare results)
+- [ ] `history --export csv`
 
-### Phase 2 — Analytics & Export
+### Phase 3 — Advanced Orders
 
-Strategy evaluation tools.
-
-- [ ] `performance` command: win rate, total P&L, Sharpe ratio, max drawdown
-- [ ] `history --export csv` for external analysis
-- [ ] `resolve --auto` periodic resolution check
-- [ ] Position age tracking (days held)
-
-### Phase 3 — Realism
-
-More accurate simulation.
-
-- [ ] Order book execution mode (VWAP slippage)
-- [ ] Dynamic fee rates from market's actual `fee_rate_bps`
-- [ ] Limit orders (price trigger, pending until matched)
-- [ ] `watch` command for real-time price monitoring
+- [ ] GTC limit orders (rest on simulated book until price hit)
+- [ ] GTD time-limited orders
+- [ ] `watch` real-time price monitoring
+- [ ] Neg-risk multi-outcome market support
 
 ### Phase 4 — Platform Expansion
 
-Multi-platform and advanced integrations.
+- [ ] Kalshi adapter
+- [ ] Historical data backtesting
+- [ ] MCP Server mode
+- [ ] WebSocket real-time feeds
 
-- [ ] Multi-account support (`--account strategy-a`)
-- [ ] Kalshi adapter (direct API or via pmxt)
-- [ ] Historical data backtesting engine
-- [ ] MCP Server mode (tool for Claude/AI agents to call directly)
-- [ ] WebSocket real-time price feeds
-
-## 9. Dependencies
+## 11. Dependencies
 
 ```toml
 [project]
+name = "pm-sim"
+version = "0.1.0"
+description = "1:1 faithful Polymarket paper trading simulator for AI agents"
 requires-python = ">=3.10"
 dependencies = [
     "click>=8.0",
@@ -386,6 +428,3 @@ dev = [
 [project.scripts]
 pm-sim = "pm_sim.cli:main"
 ```
-
-Only 2 runtime dependencies: `click` (CLI framework) and `httpx` (async-capable HTTP).
-`sqlite3` is Python stdlib.
