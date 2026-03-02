@@ -12,7 +12,7 @@ Paper trading simulator for Polymarket. Built for AI agents. Python 3.10+, SQLit
 # Install
 pip install -e ".[dev]"
 
-# Tests (615 tests, 100% coverage)
+# Tests (615 non-live + 42 live = 657 total, 100% coverage)
 python3 -m pytest tests/ -x -q -m "not live"            # fast, skip live API tests
 python3 -m pytest tests/ -v                              # verbose
 python3 -m pytest tests/ --cov=pm_trader --cov-report=term-missing  # coverage
@@ -35,10 +35,12 @@ cli.py → engine.py → api.py (Polymarket HTTP)
                    → orderbook.py (fill simulation)
                    → orders.py (limit order state machine)
 
-mcp_server.py → engine.py (same stack, 30 MCP tools)
+mcp_server.py → engine.py (trading tools, 30 MCP tools)
+              → analytics.py, card.py, benchmark.py, backtest.py (lazy imports)
 ```
 
 - **Engine** is the orchestrator. All trading logic goes through it.
+- **mcp_server.py** uses engine for trading, but imports analytics/card/benchmark/backtest directly (lazy, inside tool functions, to keep startup fast).
 - **orderbook.py** has pure functions (`simulate_buy_fill`, `simulate_sell_fill`) — no side effects.
 - **orders.py** has pure SQLite functions for limit order CRUD — no Engine dependency.
 - **api.py** talks to Gamma API (market discovery) and CLOB API (prices, order books).
@@ -58,11 +60,16 @@ mcp_server.py → engine.py (same stack, 30 MCP tools)
 - Each error has a `code` class attribute: `code = "INSUFFICIENT_BALANCE"`
 - CLI and MCP use JSON envelope: `{"ok": true, "data": {...}}` or `{"ok": false, "error": "msg", "code": "CODE"}`
 - Helper functions: `_ok(data)` and `_err(error, code)` in both cli.py and mcp_server.py
+- `_err_from(e)` in mcp_server.py: wraps exceptions — exposes `SimError`/`ValueError`/`TypeError` messages, sanitizes everything else to `"Internal error"`
 
 ### Shared helpers
 - `_market_to_dict(m)` in mcp_server.py — single serializer for Market→dict (used by all market-returning tools)
 - `_parse_market_list(data)` in api.py — shared parser for Gamma API market list responses
 - Don't cache empty API responses — guard with `len(data) > 0` before `_set_cached()`
+
+### Security
+- Account names validated via `_validate_account_name()`: rejects `..`, `/`, `\`, empty, leading/trailing whitespace
+- `MAX_RESULTS = 100` caps all market-listing tool limits to prevent resource exhaustion
 
 ### Key design decisions
 - **Fee formula**: `(bps/10000) * min(price, 1-price) * shares` — matches Polymarket exactly
