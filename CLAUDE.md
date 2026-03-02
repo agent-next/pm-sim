@@ -5,7 +5,7 @@ Paper trading simulator for Polymarket. Built for AI agents. Python 3.10+, SQLit
 ## Commands
 
 ```bash
-# Tests (607 tests, 100% coverage)
+# Tests (615 tests, 100% coverage)
 python3 -m pytest tests/ -x -q -m "not live"            # fast, skip live API tests
 python3 -m pytest tests/ -v                              # verbose
 python3 -m pytest tests/ --cov=pm_trader --cov-report=term-missing  # coverage
@@ -24,7 +24,7 @@ cli.py → engine.py → api.py (Polymarket HTTP)
                    → orderbook.py (fill simulation)
                    → orders.py (limit order state machine)
 
-mcp_server.py → engine.py (same stack, 26 MCP tools)
+mcp_server.py → engine.py (same stack, 30 MCP tools)
 ```
 
 - **Engine** is the orchestrator. All trading logic goes through it.

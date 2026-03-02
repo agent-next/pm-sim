@@ -26,6 +26,7 @@ from pm_trader.models import (
     TradeResult,
 )
 from pm_trader.orders import (
+    cancel_all_orders as _cancel_all_orders,
     cancel_order,
     create_order,
     expire_orders,
@@ -445,6 +446,11 @@ class Engine:
         if order is None:
             return None
         return _order_to_dict(order)
+
+    def cancel_all_orders(self) -> list[dict]:
+        """Cancel all pending limit orders. Returns list of cancelled orders."""
+        cancelled = _cancel_all_orders(self.db.conn)
+        return [_order_to_dict(o) for o in cancelled]
 
     def check_orders(self) -> list[dict]:
         """Check all pending orders against live prices and execute fills.

@@ -179,6 +179,44 @@ class PolymarketClient:
             return []
         return [_parse_market(m) for m in data if _has_condition_id(m)]
 
+    def get_tags(self) -> list[dict]:
+        """Fetch all market tags/categories from Gamma API.  Cached 5 min."""
+        cache_key = "tags:all"
+        cached = self._get_cached(cache_key)
+        if cached is not None:
+            return cached
+        data = self._gamma_get("/tags")
+        if not isinstance(data, list):
+            return []
+        self._set_cached(cache_key, data)
+        return data
+
+    def get_markets_by_tag(
+        self, tag_slug: str, *, limit: int = 20, closed: bool = False,
+    ) -> list[Market]:
+        """Fetch markets filtered by tag slug."""
+        params: dict = {
+            "tag_slug": tag_slug,
+            "limit": limit,
+            "closed": str(closed).lower(),
+            "active": "true",
+        }
+        data = self._gamma_get("/markets", params=params)
+        if not isinstance(data, list):
+            return []
+        return [_parse_market(m) for m in data if _has_condition_id(m)]
+
+    def get_event(self, slug: str) -> dict:
+        """Fetch event details (group of related markets).  Cached 5 min."""
+        cache_key = f"event:{slug}"
+        cached = self._get_cached(cache_key)
+        if cached is not None:
+            return cached
+        data = self._gamma_get(f"/events/{slug}")
+        if isinstance(data, dict):
+            self._set_cached(cache_key, data)
+        return data if isinstance(data, dict) else {}
+
     # ------------------------------------------------------------------
     # CLOB API — prices, order book, fees, tick size
     # ------------------------------------------------------------------

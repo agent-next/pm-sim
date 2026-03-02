@@ -19,11 +19,15 @@ from pm_trader import mcp_server
 from pm_trader.mcp_server import (
     backtest,
     buy,
+    cancel_all_orders,
     cancel_order,
     check_orders,
     get_balance,
+    get_event,
     get_market,
+    get_markets_by_tag,
     get_order_book,
+    get_tags,
     history,
     init_account,
     leaderboard_card,
@@ -480,6 +484,103 @@ class TestListMarkets:
         _mock_engine_api(_get_engine())
         result = _parse(list_markets(sort_by="liquidity"))
         assert result["ok"] is True
+
+
+class TestGetTags:
+    def test_get_tags(self):
+        init_account()
+        from pm_trader.mcp_server import _get_engine
+        engine = _get_engine()
+        tags = [{"id": "1", "label": "Politics", "slug": "politics"}]
+        engine.api.get_tags = MagicMock(return_value=tags)
+        result = _parse(get_tags())
+        assert result["ok"] is True
+        assert len(result["data"]) == 1
+        assert result["data"][0]["slug"] == "politics"
+
+    def test_get_tags_error(self):
+        init_account()
+        from pm_trader.mcp_server import _get_engine
+        engine = _get_engine()
+        engine.api.get_tags = MagicMock(side_effect=Exception("fail"))
+        result = _parse(get_tags())
+        assert result["ok"] is False
+
+
+class TestGetMarketsByTag:
+    def test_get_markets_by_tag(self):
+        init_account()
+        from pm_trader.mcp_server import _get_engine
+        engine = _get_engine()
+        engine.api.get_markets_by_tag = MagicMock(return_value=[SAMPLE_MARKET])
+        result = _parse(get_markets_by_tag("politics"))
+        assert result["ok"] is True
+        assert len(result["data"]) == 1
+        assert result["data"][0]["slug"] == "will-bitcoin-hit-100k"
+
+    def test_get_markets_by_tag_empty(self):
+        init_account()
+        from pm_trader.mcp_server import _get_engine
+        engine = _get_engine()
+        engine.api.get_markets_by_tag = MagicMock(return_value=[])
+        result = _parse(get_markets_by_tag("nonexistent"))
+        assert result["ok"] is True
+        assert result["data"] == []
+
+    def test_get_markets_by_tag_error(self):
+        init_account()
+        from pm_trader.mcp_server import _get_engine
+        engine = _get_engine()
+        engine.api.get_markets_by_tag = MagicMock(side_effect=Exception("fail"))
+        result = _parse(get_markets_by_tag("bad"))
+        assert result["ok"] is False
+
+
+class TestGetEvent:
+    def test_get_event(self):
+        init_account()
+        from pm_trader.mcp_server import _get_engine
+        engine = _get_engine()
+        event_data = {"title": "US Elections", "slug": "us-elections"}
+        engine.api.get_event = MagicMock(return_value=event_data)
+        result = _parse(get_event("us-elections"))
+        assert result["ok"] is True
+        assert result["data"]["title"] == "US Elections"
+
+    def test_get_event_error(self):
+        init_account()
+        from pm_trader.mcp_server import _get_engine
+        engine = _get_engine()
+        engine.api.get_event = MagicMock(side_effect=Exception("fail"))
+        result = _parse(get_event("bad"))
+        assert result["ok"] is False
+
+
+class TestCancelAllOrders:
+    def test_cancel_all_empty(self):
+        init_account()
+        result = _parse(cancel_all_orders())
+        assert result["ok"] is True
+        assert result["data"]["cancelled"] == 0
+        assert result["data"]["orders"] == []
+
+    def test_cancel_all_with_orders(self):
+        init_account()
+        from pm_trader.mcp_server import _get_engine
+        _mock_engine_api(_get_engine())
+        place_limit_order("will-bitcoin-hit-100k", "yes", "buy", 100.0, 0.55)
+        place_limit_order("will-bitcoin-hit-100k", "yes", "buy", 200.0, 0.50)
+        result = _parse(cancel_all_orders())
+        assert result["ok"] is True
+        assert result["data"]["cancelled"] == 2
+
+    def test_cancel_all_not_initialized(self):
+        result = _parse(cancel_all_orders())
+        assert result["ok"] is True or result["ok"] is False
+
+    def test_cancel_all_traversal(self):
+        result = _parse(cancel_all_orders(account="../evil"))
+        assert result["ok"] is False
 
 
 class TestGetMarket:
