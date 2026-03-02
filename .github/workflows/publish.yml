@@ -77,7 +77,8 @@ jobs:
           CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
 
   release:
-    needs: [publish-pypi, publish-clawhub]
+    needs: [test]
+    if: always() && needs.test.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
