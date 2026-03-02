@@ -199,7 +199,7 @@ class PolymarketClient:
             "tag_slug": tag_slug,
             "limit": limit,
             "closed": str(closed).lower(),
-            "active": "true",
+            "active": str(not closed).lower(),
         }
         data = self._gamma_get("/markets", params=params)
         if not isinstance(data, list):
