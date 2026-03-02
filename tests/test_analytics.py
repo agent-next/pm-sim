@@ -120,6 +120,16 @@ class TestWinRate:
         ]
         assert win_rate(trades) == 0.0
 
+    def test_buy_fees_increase_entry_basis(self):
+        """Entry basis includes buy fees for win/loss classification."""
+        # Buy 100 shares for $50 with $5 fee -> fee-inclusive basis is 0.55/share.
+        # Sell at 0.52 should be LOSS when fees are included.
+        trades = [
+            _trade(id=1, side="buy", amount_usd=50.0, shares=100.0, avg_price=0.50, fee=5.0),
+            _trade(id=2, side="sell", amount_usd=52.0, shares=100.0, avg_price=0.52, fee=0.0),
+        ]
+        assert win_rate(trades) == 0.0
+
 
 # ---------------------------------------------------------------------------
 # sharpe_ratio tests

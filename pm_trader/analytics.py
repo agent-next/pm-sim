@@ -59,7 +59,7 @@ def win_rate(trades: list[Trade]) -> float:
     A sell is "winning" if the sell avg_price exceeds the weighted-average
     entry price from all buys in that (market, outcome).
 
-    Tracks cumulative cost and shares per position key to compute
+    Tracks cumulative fee-inclusive cost and shares per position key to compute
     cost-averaged entry, rather than using only the last buy price.
     """
     sells = [t for t in trades if t.side == "sell"]
@@ -72,7 +72,8 @@ def win_rate(trades: list[Trade]) -> float:
     for t in trades:
         if t.side == "buy":
             key = (t.market_condition_id, t.outcome)
-            buy_cost[key] += t.amount_usd
+            # Align with engine position accounting: buy cost basis includes fees.
+            buy_cost[key] += (t.amount_usd + t.fee)
             buy_shares[key] += t.shares
 
     wins = 0
