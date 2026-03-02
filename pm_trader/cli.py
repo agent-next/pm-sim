@@ -155,12 +155,16 @@ def markets() -> None:
 @markets.command("list")
 @click.option("--limit", type=int, default=20)
 @click.option("--sort", "sort_by", type=click.Choice(["volume", "liquidity"]), default="volume")
+@click.option("--tag", "tag_slug", default=None, help="Filter by tag slug.")
 @click.pass_context
-def markets_list(ctx: click.Context, limit: int, sort_by: str) -> None:
+def markets_list(ctx: click.Context, limit: int, sort_by: str, tag_slug: str | None) -> None:
     """List active markets."""
     engine = _get_engine(ctx)
     try:
-        result = engine.api.list_markets(limit=limit, sort_by=sort_by)
+        if tag_slug:
+            result = engine.api.get_markets_by_tag(tag_slug, limit=limit)
+        else:
+            result = engine.api.list_markets(limit=limit, sort_by=sort_by)
         click.echo(_ok(result))
     except SimError as e:
         click.echo(_err(e))
@@ -195,6 +199,37 @@ def markets_get(ctx: click.Context, slug_or_id: str) -> None:
     try:
         market = engine.api.get_market(slug_or_id)
         click.echo(_ok(market))
+    except SimError as e:
+        click.echo(_err(e))
+        sys.exit(1)
+    finally:
+        engine.close()
+
+
+@markets.command("tags")
+@click.pass_context
+def markets_tags(ctx: click.Context) -> None:
+    """List all market categories/tags."""
+    engine = _get_engine(ctx)
+    try:
+        tags = engine.api.get_tags()
+        click.echo(_ok(tags))
+    except SimError as e:
+        click.echo(_err(e))
+        sys.exit(1)
+    finally:
+        engine.close()
+
+
+@markets.command("event")
+@click.argument("slug")
+@click.pass_context
+def markets_event(ctx: click.Context, slug: str) -> None:
+    """Get event details (group of related markets)."""
+    engine = _get_engine(ctx)
+    try:
+        event = engine.api.get_event(slug)
+        click.echo(_ok(event))
     except SimError as e:
         click.echo(_err(e))
         sys.exit(1)
@@ -771,6 +806,21 @@ def orders_cancel(ctx: click.Context, order_id: int) -> None:
             ))
             sys.exit(1)
         click.echo(_ok(result))
+    except SimError as e:
+        click.echo(_err(e))
+        sys.exit(1)
+    finally:
+        engine.close()
+
+
+@orders.command("cancel-all")
+@click.pass_context
+def orders_cancel_all(ctx: click.Context) -> None:
+    """Cancel all pending limit orders at once."""
+    engine = _get_engine(ctx)
+    try:
+        cancelled = engine.cancel_all_orders()
+        click.echo(_ok({"cancelled": len(cancelled), "orders": cancelled}))
     except SimError as e:
         click.echo(_err(e))
         sys.exit(1)

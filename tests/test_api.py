@@ -792,3 +792,112 @@ class TestParseMarketClobTokenIds:
         market = _parse_market(data)
         assert market.tokens[0]["outcome"] == "Yes"
         assert market.tokens[1]["outcome"] == "Outcome1"
+
+
+# ---------------------------------------------------------------------------
+# get_tags tests
+# ---------------------------------------------------------------------------
+
+
+class TestGetTags:
+    def test_get_tags(self, client: PolymarketClient, httpx_mock):
+        tags = [
+            {"id": "1", "label": "Politics", "slug": "politics"},
+            {"id": "2", "label": "Crypto", "slug": "crypto"},
+        ]
+        httpx_mock.add_response(
+            url=httpx.URL(GAMMA_BASE + "/tags"),
+            json=tags,
+        )
+        result = client.get_tags()
+        assert len(result) == 2
+        assert result[0]["slug"] == "politics"
+
+    def test_get_tags_cached(self, client: PolymarketClient, httpx_mock):
+        tags = [{"id": "1", "label": "Sports", "slug": "sports"}]
+        httpx_mock.add_response(
+            url=httpx.URL(GAMMA_BASE + "/tags"),
+            json=tags,
+        )
+        r1 = client.get_tags()
+        r2 = client.get_tags()
+        assert r1 == r2
+        assert len(httpx_mock.get_requests()) == 1
+
+    def test_get_tags_non_list(self, client: PolymarketClient, httpx_mock):
+        httpx_mock.add_response(
+            url=httpx.URL(GAMMA_BASE + "/tags"),
+            json={"error": "unexpected"},
+        )
+        result = client.get_tags()
+        assert result == []
+
+
+# ---------------------------------------------------------------------------
+# get_markets_by_tag tests
+# ---------------------------------------------------------------------------
+
+
+class TestGetMarketsByTag:
+    def test_get_markets_by_tag(self, client: PolymarketClient, httpx_mock):
+        httpx_mock.add_response(json=[SAMPLE_GAMMA_MARKET])
+        markets = client.get_markets_by_tag("politics", limit=5)
+        assert len(markets) == 1
+        assert markets[0].slug == "will-bitcoin-hit-100k"
+
+    def test_get_markets_by_tag_empty(self, client: PolymarketClient, httpx_mock):
+        httpx_mock.add_response(json=[])
+        markets = client.get_markets_by_tag("nonexistent")
+        assert markets == []
+
+    def test_get_markets_by_tag_non_list(self, client: PolymarketClient, httpx_mock):
+        httpx_mock.add_response(json={"error": "bad"})
+        markets = client.get_markets_by_tag("bad")
+        assert markets == []
+
+    def test_get_markets_by_tag_closed(self, client: PolymarketClient, httpx_mock):
+        httpx_mock.add_response(json=[SAMPLE_GAMMA_MARKET])
+        markets = client.get_markets_by_tag("politics", closed=True)
+        assert len(markets) == 1
+        req = httpx_mock.get_requests()[0]
+        assert "closed=true" in str(req.url)
+
+
+# ---------------------------------------------------------------------------
+# get_event tests
+# ---------------------------------------------------------------------------
+
+
+class TestGetEvent:
+    def test_get_event(self, client: PolymarketClient, httpx_mock):
+        event_data = {
+            "title": "US Elections 2028",
+            "slug": "us-elections-2028",
+            "markets": [{"slug": "who-wins-2028"}],
+        }
+        httpx_mock.add_response(
+            url=httpx.URL(GAMMA_BASE + "/events/us-elections-2028"),
+            json=event_data,
+        )
+        result = client.get_event("us-elections-2028")
+        assert result["title"] == "US Elections 2028"
+        assert len(result["markets"]) == 1
+
+    def test_get_event_cached(self, client: PolymarketClient, httpx_mock):
+        event_data = {"title": "Event", "slug": "evt"}
+        httpx_mock.add_response(
+            url=httpx.URL(GAMMA_BASE + "/events/evt"),
+            json=event_data,
+        )
+        r1 = client.get_event("evt")
+        r2 = client.get_event("evt")
+        assert r1 == r2
+        assert len(httpx_mock.get_requests()) == 1
+
+    def test_get_event_non_dict(self, client: PolymarketClient, httpx_mock):
+        httpx_mock.add_response(
+            url=httpx.URL(GAMMA_BASE + "/events/bad"),
+            json=[],
+        )
+        result = client.get_event("bad")
+        assert result == {}

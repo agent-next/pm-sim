@@ -198,6 +198,54 @@ def get_order_book(slug_or_id: str, outcome: str = "yes") -> str:
 
 
 @mcp.tool()
+def get_tags() -> str:
+    """Get all market categories/tags for filtering."""
+    try:
+        engine = _get_engine()
+        tags = engine.api.get_tags()
+        return _ok(tags)
+    except Exception as e:
+        return _err_from(e)
+
+
+@mcp.tool()
+def get_markets_by_tag(tag_slug: str, limit: int = 20) -> str:
+    """List markets in a specific category/tag."""
+    try:
+        engine = _get_engine()
+        markets = engine.api.get_markets_by_tag(
+            tag_slug, limit=min(limit, MAX_RESULTS),
+        )
+        return _ok([
+            {
+                "slug": m.slug,
+                "question": m.question,
+                "condition_id": m.condition_id,
+                "outcomes": m.outcomes,
+                "outcome_prices": m.outcome_prices,
+                "volume": m.volume,
+                "liquidity": m.liquidity,
+                "closed": m.closed,
+                "end_date": m.end_date,
+            }
+            for m in markets
+        ])
+    except Exception as e:
+        return _err_from(e)
+
+
+@mcp.tool()
+def get_event(slug: str) -> str:
+    """Get event details — a group of related markets."""
+    try:
+        engine = _get_engine()
+        event = engine.api.get_event(slug)
+        return _ok(event)
+    except Exception as e:
+        return _err_from(e)
+
+
+@mcp.tool()
 def watch_prices(
     slugs: str, outcomes: str = "yes",
 ) -> str:
@@ -388,6 +436,17 @@ def cancel_order(order_id: int, account: str = "default") -> str:
         if order is None:
             return _err(f"Order {order_id} not found or not pending", "not_found")
         return _ok(order)
+    except Exception as e:
+        return _err_from(e)
+
+
+@mcp.tool()
+def cancel_all_orders(account: str = "default") -> str:
+    """Cancel all pending limit orders at once."""
+    try:
+        engine = _get_engine(account)
+        cancelled = engine.cancel_all_orders()
+        return _ok({"cancelled": len(cancelled), "orders": cancelled})
     except Exception as e:
         return _err_from(e)
 

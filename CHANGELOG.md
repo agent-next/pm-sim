@@ -6,6 +6,12 @@ All notable changes to `polymarket-paper-trader` are documented here.
 
 ### Added
 - skills.sh support — skill discoverable via `npx skills add agent-next/polymarket-paper-trader`
+- Market discovery: `get_tags` — list all market categories/tags (cached 5 min)
+- Market discovery: `get_markets_by_tag` — filter markets by tag slug
+- Market discovery: `get_event` — fetch event details (group of related markets, cached 5 min)
+- `cancel_all_orders` — batch cancel all pending limit orders at once
+- CLI: `markets tags`, `markets --tag <slug>`, `markets event <slug>`, `orders cancel-all`
+- MCP tool count: 26 → 30
 
 ### Security
 - Add data trust boundaries to SKILL.md — mark Polymarket API data as untrusted, prevent indirect prompt injection via market content

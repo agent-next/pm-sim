@@ -301,6 +301,62 @@ class TestMarketCommands:
         assert data["ok"] is True
         assert data["data"]["slug"] == "will-bitcoin-hit-100k"
 
+    @patch("pm_trader.engine.PolymarketClient")
+    def test_markets_list_by_tag(self, MockClient, runner, data_dir):
+        _invoke(runner, ["init"], data_dir)
+        mock_instance = MockClient.return_value
+        mock_instance.get_markets_by_tag.return_value = [SAMPLE_MARKET]
+        result = _invoke(runner, ["markets", "list", "--tag", "politics"], data_dir)
+        data = _parse(result)
+        assert data["ok"] is True
+        assert len(data["data"]) == 1
+
+    @patch("pm_trader.engine.PolymarketClient")
+    def test_markets_tags(self, MockClient, runner, data_dir):
+        _invoke(runner, ["init"], data_dir)
+        mock_instance = MockClient.return_value
+        mock_instance.get_tags.return_value = [
+            {"id": "1", "label": "Politics", "slug": "politics"},
+        ]
+        result = _invoke(runner, ["markets", "tags"], data_dir)
+        data = _parse(result)
+        assert data["ok"] is True
+        assert len(data["data"]) == 1
+        assert data["data"][0]["slug"] == "politics"
+
+    @patch("pm_trader.engine.PolymarketClient")
+    def test_markets_tags_error(self, MockClient, runner, data_dir):
+        from pm_trader.models import ApiError
+        _invoke(runner, ["init"], data_dir)
+        mock_instance = MockClient.return_value
+        mock_instance.get_tags.side_effect = ApiError("fail")
+        result = _invoke(runner, ["markets", "tags"], data_dir)
+        data = _parse(result)
+        assert data["ok"] is False
+
+    @patch("pm_trader.engine.PolymarketClient")
+    def test_markets_event(self, MockClient, runner, data_dir):
+        _invoke(runner, ["init"], data_dir)
+        mock_instance = MockClient.return_value
+        mock_instance.get_event.return_value = {
+            "title": "US Elections 2028",
+            "slug": "us-elections-2028",
+        }
+        result = _invoke(runner, ["markets", "event", "us-elections-2028"], data_dir)
+        data = _parse(result)
+        assert data["ok"] is True
+        assert data["data"]["title"] == "US Elections 2028"
+
+    @patch("pm_trader.engine.PolymarketClient")
+    def test_markets_event_error(self, MockClient, runner, data_dir):
+        from pm_trader.models import ApiError
+        _invoke(runner, ["init"], data_dir)
+        mock_instance = MockClient.return_value
+        mock_instance.get_event.side_effect = ApiError("not found")
+        result = _invoke(runner, ["markets", "event", "bad"], data_dir)
+        data = _parse(result)
+        assert data["ok"] is False
+
 
 # ---------------------------------------------------------------------------
 # Price & book commands
@@ -557,6 +613,34 @@ class TestOrderCommands:
         result = _invoke(runner, ["orders", "check"], data_dir)
         data = _parse(result)
         assert data["ok"] is True
+
+    @patch("pm_trader.engine.PolymarketClient")
+    def test_orders_cancel_all_empty(self, MockClient, runner, data_dir):
+        _invoke(runner, ["init"], data_dir)
+        result = _invoke(runner, ["orders", "cancel-all"], data_dir)
+        data = _parse(result)
+        assert data["ok"] is True
+        assert data["data"]["cancelled"] == 0
+
+    @patch("pm_trader.engine.PolymarketClient")
+    def test_orders_cancel_all_with_orders(self, MockClient, runner, data_dir):
+        _invoke(runner, ["init"], data_dir)
+        mock_instance = MockClient.return_value
+        mock_instance.get_market.return_value = SAMPLE_MARKET
+        _invoke(
+            runner,
+            ["orders", "place", "will-bitcoin-hit-100k", "yes", "buy", "100", "0.55"],
+            data_dir,
+        )
+        _invoke(
+            runner,
+            ["orders", "place", "will-bitcoin-hit-100k", "yes", "buy", "200", "0.50"],
+            data_dir,
+        )
+        result = _invoke(runner, ["orders", "cancel-all"], data_dir)
+        data = _parse(result)
+        assert data["ok"] is True
+        assert data["data"]["cancelled"] == 2
 
 
 # ---------------------------------------------------------------------------
@@ -938,6 +1022,16 @@ class TestCliSimErrorPaths:
         _invoke(runner, ["init"], data_dir)
         mock_check.side_effect = SimError("fail")
         result = _invoke(runner, ["orders", "check"], data_dir)
+        data = _parse(result)
+        assert data["ok"] is False
+        assert result.exit_code == 1
+
+    @patch("pm_trader.engine.Engine.cancel_all_orders")
+    def test_orders_cancel_all_sim_error(self, mock_cancel_all, runner, data_dir):
+        from pm_trader.models import SimError
+        _invoke(runner, ["init"], data_dir)
+        mock_cancel_all.side_effect = SimError("fail")
+        result = _invoke(runner, ["orders", "cancel-all"], data_dir)
         data = _parse(result)
         assert data["ok"] is False
         assert result.exit_code == 1

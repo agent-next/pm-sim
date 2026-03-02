@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from pm_trader.orders import (
+    cancel_all_orders,
     cancel_order,
     create_order,
     expire_orders,
@@ -121,6 +122,31 @@ class TestExpireOrders:
         _create(conn, order_type="gtc")
         expired = expire_orders(conn)
         assert len(expired) == 0
+
+
+class TestCancelAllOrders:
+    def test_cancel_all_empty(self, conn):
+        result = cancel_all_orders(conn)
+        assert result == []
+
+    def test_cancel_all_cancels_pending(self, conn):
+        _create(conn)
+        _create(conn)
+        _create(conn)
+        cancelled = cancel_all_orders(conn)
+        assert len(cancelled) == 3
+        assert all(o.status == "cancelled" for o in cancelled)
+        pending = get_pending_orders(conn)
+        assert len(pending) == 0
+
+    def test_cancel_all_skips_non_pending(self, conn):
+        _create(conn)
+        _create(conn)
+        cancel_order(conn, 1)  # manually cancel #1
+        cancelled = cancel_all_orders(conn)
+        assert len(cancelled) == 1  # only #2 was pending
+        assert cancelled[0].id == 2
+        assert cancelled[0].status == "cancelled"
 
 
 class TestShouldFill:

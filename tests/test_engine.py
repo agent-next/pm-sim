@@ -818,6 +818,20 @@ class TestLimitOrderExecution:
         assert len(get_pending_orders(initialized_engine.db.conn)) == 1
 
 
+class TestCancelAllOrders:
+    def test_cancel_all_empty(self, initialized_engine: Engine):
+        result = initialized_engine.cancel_all_orders()
+        assert result == []
+
+    def test_cancel_all_with_orders(self, initialized_engine: Engine):
+        _mock_api(initialized_engine)
+        initialized_engine.place_limit_order("btc", "yes", "buy", 100.0, 0.55)
+        initialized_engine.place_limit_order("btc", "yes", "buy", 200.0, 0.50)
+        cancelled = initialized_engine.cancel_all_orders()
+        assert len(cancelled) == 2
+        assert initialized_engine.get_pending_orders() == []
+
+
 class TestOrderTypeValidation:
     def test_invalid_order_type_rejected(self, initialized_engine: Engine):
         _mock_api(initialized_engine)
