@@ -14,6 +14,7 @@ from pm_trader.orders import (
     expire_orders,
     get_pending_orders,
     init_orders_schema,
+    mark_partially_filled,
     should_fill,
     LimitOrder,
 )
@@ -48,6 +49,7 @@ class TestCreateOrder:
         order = _create(conn)
         assert order.id == 1
         assert order.status == "pending"
+        assert order.remaining_amount == 100.0
         assert order.market_slug == "test-market"
         assert order.limit_price == 0.55
         assert order.order_type == "gtc"
@@ -89,6 +91,14 @@ class TestGetPendingOrders:
         assert len(pending) == 1
         assert pending[0].id == 2
 
+    def test_includes_partially_filled(self, conn):
+        _create(conn, amount=120.0)
+        mark_partially_filled(conn, 1, 40.0)
+        pending = get_pending_orders(conn)
+        assert len(pending) == 1
+        assert pending[0].status == "partially_filled"
+        assert pending[0].remaining_amount == 40.0
+
 
 class TestCancelOrder:
     def test_cancel_pending(self, conn):
@@ -103,6 +113,13 @@ class TestCancelOrder:
         _create(conn)
         cancel_order(conn, 1)
         assert cancel_order(conn, 1) is None
+
+    def test_cancel_partially_filled(self, conn):
+        _create(conn, amount=120.0)
+        mark_partially_filled(conn, 1, 40.0)
+        cancelled = cancel_order(conn, 1)
+        assert cancelled is not None
+        assert cancelled.status == "cancelled"
 
 
 class TestExpireOrders:
@@ -154,6 +171,7 @@ class TestShouldFill:
         order = LimitOrder(
             id=1, market_slug="m", market_condition_id="0x1",
             outcome="yes", side="buy", amount=100, limit_price=0.55,
+            remaining_amount=100,
             order_type="gtc", expires_at=None, status="pending",
             created_at="", filled_at=None,
         )
@@ -165,6 +183,7 @@ class TestShouldFill:
         order = LimitOrder(
             id=1, market_slug="m", market_condition_id="0x1",
             outcome="yes", side="sell", amount=50, limit_price=0.70,
+            remaining_amount=50,
             order_type="gtc", expires_at=None, status="pending",
             created_at="", filled_at=None,
         )

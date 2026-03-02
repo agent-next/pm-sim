@@ -130,6 +130,8 @@ class Market:
     tokens: list[dict[str, Any]]
     active: bool
     closed: bool
+    accepting_orders: bool = True
+    neg_risk: bool = False
     volume: float = 0.0
     liquidity: float = 0.0
     end_date: str = ""

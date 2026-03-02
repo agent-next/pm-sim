@@ -20,6 +20,7 @@ from pm_trader.models import (
     OrderBook,
     OrderBookLevel,
     OrderRejectedError,
+    TickSizeViolationError,
 )
 
 
@@ -193,6 +194,45 @@ class TestBuy:
         _mock_api(initialized_engine, market=closed)
         with pytest.raises(MarketClosedError):
             initialized_engine.buy("closed-market", "yes", 100.0)
+
+    def test_buy_inactive_market_rejected(self, initialized_engine: Engine):
+        inactive = Market(
+            condition_id="0xabc123",
+            slug="inactive-market",
+            question="Inactive?",
+            description="",
+            outcomes=["Yes", "No"],
+            outcome_prices=[0.65, 0.35],
+            tokens=[
+                {"token_id": "t1", "outcome": "Yes"},
+                {"token_id": "t2", "outcome": "No"},
+            ],
+            active=False,
+            closed=False,
+        )
+        _mock_api(initialized_engine, market=inactive)
+        with pytest.raises(OrderRejectedError, match="not active"):
+            initialized_engine.buy("inactive-market", "yes", 100.0)
+
+    def test_buy_market_not_accepting_orders_rejected(self, initialized_engine: Engine):
+        paused = Market(
+            condition_id="0xabc123",
+            slug="paused-market",
+            question="Paused?",
+            description="",
+            outcomes=["Yes", "No"],
+            outcome_prices=[0.65, 0.35],
+            tokens=[
+                {"token_id": "t1", "outcome": "Yes"},
+                {"token_id": "t2", "outcome": "No"},
+            ],
+            active=True,
+            closed=False,
+            accepting_orders=False,
+        )
+        _mock_api(initialized_engine, market=paused)
+        with pytest.raises(OrderRejectedError, match="not accepting orders"):
+            initialized_engine.buy("paused-market", "yes", 100.0)
 
     def test_buy_fok_rejected_insufficient_liquidity(self, initialized_engine: Engine):
         thin_book = _make_book(
@@ -574,6 +614,13 @@ class TestLimitOrderValidation:
                 "btc", "yes", "buy", 0.50, 0.55,
             )
 
+    def test_limit_price_tick_size_violation_rejected(self, initialized_engine: Engine):
+        _mock_api(initialized_engine)
+        with pytest.raises(TickSizeViolationError):
+            initialized_engine.place_limit_order(
+                "btc", "yes", "buy", 100.0, 0.555,
+            )
+
 
 class TestLimitOrderPriceEnforcement:
     """Bug #1: Limit orders must NOT fill at prices beyond the limit."""
@@ -668,6 +715,14 @@ class TestSellEdgeCases:
         initialized_engine.api.get_order_book = MagicMock(return_value=empty_book)
         with pytest.raises(OrderRejectedError, match="FOK rejected"):
             initialized_engine.sell("btc", "yes", 10.0)
+
+    def test_sell_below_min_notional_rejected(self, initialized_engine: Engine):
+        _mock_api(initialized_engine)
+        initialized_engine.buy("btc", "yes", 100.0)
+        tiny_notional_book = _make_book(bids=[(0.10, 1000)], asks=[(0.20, 1000)])
+        initialized_engine.api.get_order_book = MagicMock(return_value=tiny_notional_book)
+        with pytest.raises(OrderRejectedError, match="Minimum order size"):
+            initialized_engine.sell("btc", "yes", 5.0)
 
 
 class TestResolveMarket:
