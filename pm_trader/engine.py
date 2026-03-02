@@ -517,7 +517,7 @@ class Engine:
                     if best_ask is None or best_ask > order.limit_price:
                         continue
                     fill = simulate_buy_fill(
-                        book, order.amount, fee_rate_bps, "fak",
+                        book, order.remaining_amount, fee_rate_bps, "fak",
                         max_price=order.limit_price,
                     )
                 else:
@@ -526,7 +526,7 @@ class Engine:
                     if best_bid is None or best_bid < order.limit_price:
                         continue
                     fill = simulate_sell_fill(
-                        book, order.amount, fee_rate_bps, "fak",
+                        book, order.remaining_amount, fee_rate_bps, "fak",
                         min_price=order.limit_price,
                     )
 
