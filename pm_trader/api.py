@@ -149,6 +149,13 @@ class PolymarketClient:
 
         raise MarketNotFoundError(slug_or_id)
 
+    @staticmethod
+    def _parse_market_list(data: object) -> list[Market]:
+        """Parse a Gamma API response into a list of Markets."""
+        if not isinstance(data, list):
+            return []
+        return [_parse_market(m) for m in data if _has_condition_id(m)]
+
     def list_markets(
         self, *, limit: int = 20, sort_by: str = "volume"
     ) -> list[Market]:
@@ -165,19 +172,13 @@ class PolymarketClient:
             params["order"] = "liquidity"
             params["ascending"] = "false"
 
-        data = self._gamma_get("/markets", params=params)
-        if not isinstance(data, list):
-            return []
-        return [_parse_market(m) for m in data if _has_condition_id(m)]
+        return self._parse_market_list(self._gamma_get("/markets", params=params))
 
     def search_markets(self, query: str, *, limit: int = 10) -> list[Market]:
         """Search markets by text query."""
-        data = self._gamma_get(
-            "/markets", params={"_q": query, "limit": limit}
+        return self._parse_market_list(
+            self._gamma_get("/markets", params={"_q": query, "limit": limit})
         )
-        if not isinstance(data, list):
-            return []
-        return [_parse_market(m) for m in data if _has_condition_id(m)]
 
     def get_tags(self) -> list[dict]:
         """Fetch all market tags/categories from Gamma API.  Cached 5 min."""
@@ -186,7 +187,7 @@ class PolymarketClient:
         if cached is not None:
             return cached
         data = self._gamma_get("/tags")
-        if not isinstance(data, list):
+        if not isinstance(data, list) or len(data) == 0:
             return []
         self._set_cached(cache_key, data)
         return data
@@ -201,10 +202,7 @@ class PolymarketClient:
             "closed": str(closed).lower(),
             "active": str(not closed).lower(),
         }
-        data = self._gamma_get("/markets", params=params)
-        if not isinstance(data, list):
-            return []
-        return [_parse_market(m) for m in data if _has_condition_id(m)]
+        return self._parse_market_list(self._gamma_get("/markets", params=params))
 
     def get_event(self, slug: str) -> dict:
         """Fetch event details (group of related markets).  Cached 5 min."""
