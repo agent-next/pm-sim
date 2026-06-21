@@ -496,8 +496,8 @@ class TestFeeSimulation:
                 assert t.fee_rate_bps == 200
                 assert t.fee > 0, "Fee should be non-zero with 200bps"
 
-                # Fee formula: (200/10000) * min(price, 1-price) * amount_usd
-                expected_fee_approx = 0.02 * min(t.avg_price, 1.0 - t.avg_price) * t.amount_usd
+                # Fee formula: (200/10000) * min(price, 1-price) * shares
+                expected_fee_approx = 0.02 * min(t.avg_price, 1.0 - t.avg_price) * t.shares
                 assert t.fee == pytest.approx(expected_fee_approx, rel=0.1)
 
                 # Cash deducted = amount + fee

@@ -153,7 +153,7 @@ def simulate_buy_fill(
         return _empty_fill_result()
 
     avg_price = total_cost / total_shares if total_shares > 0 else 0.0
-    fee = calculate_fee(fee_rate_bps, avg_price, total_cost)
+    fee = calculate_fee(fee_rate_bps, avg_price, total_shares)
 
     midpoint = _midpoint(book)
     if midpoint and midpoint > 0:
