@@ -38,6 +38,15 @@ jobs:
         with:
           fetch-depth: 1
           persist-credentials: false
+      - name: Preflight FreeInference key
+        env:
+          FREEINFERENCE_API_KEY: ${{ secrets.FREEINFERENCE_API_KEY }}
+        run: |
+          if [ -z "$FREEINFERENCE_API_KEY" ]; then
+            echo "FREEINFERENCE_API_KEY is empty" >&2
+            exit 1
+          fi
+          echo "FREEINFERENCE_API_KEY is set (len=${#FREEINFERENCE_API_KEY})"
       - uses: anomalyco/opencode/github@31406ccc51b4bd2a4e1e086b2bcaa5f7f804f26d # v1.18.18
         env:
           FREEINFERENCE_API_KEY: ${{ secrets.FREEINFERENCE_API_KEY }}
@@ -67,6 +76,15 @@ jobs:
         with:
           fetch-depth: 1
           persist-credentials: false
+      - name: Preflight FreeInference key
+        env:
+          FREEINFERENCE_API_KEY: ${{ secrets.FREEINFERENCE_API_KEY }}
+        run: |
+          if [ -z "$FREEINFERENCE_API_KEY" ]; then
+            echo "FREEINFERENCE_API_KEY is empty" >&2
+            exit 1
+          fi
+          echo "FREEINFERENCE_API_KEY is set (len=${#FREEINFERENCE_API_KEY})"
       - uses: anomalyco/opencode/github@31406ccc51b4bd2a4e1e086b2bcaa5f7f804f26d # v1.18.18
         env:
           FREEINFERENCE_API_KEY: ${{ secrets.FREEINFERENCE_API_KEY }}
@@ -91,6 +109,15 @@ jobs:
         with:
           fetch-depth: 1
           persist-credentials: false
+      - name: Preflight FreeInference key
+        env:
+          FREEINFERENCE_API_KEY: ${{ secrets.FREEINFERENCE_API_KEY }}
+        run: |
+          if [ -z "$FREEINFERENCE_API_KEY" ]; then
+            echo "FREEINFERENCE_API_KEY is empty" >&2
+            exit 1
+          fi
+          echo "FREEINFERENCE_API_KEY is set (len=${#FREEINFERENCE_API_KEY})"
       - uses: anomalyco/opencode/github@31406ccc51b4bd2a4e1e086b2bcaa5f7f804f26d # v1.18.18
         env:
           FREEINFERENCE_API_KEY: ${{ secrets.FREEINFERENCE_API_KEY }}
