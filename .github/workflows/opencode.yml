@@ -1,0 +1,105 @@
+name: opencode
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  issues:
+    types: [opened]
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+
+concurrency:
+  group: opencode-${{ github.event.pull_request.number || github.event.issue.number || github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  # Public-repo bot: Harvard SEAS FreeInference (OpenAI-compatible).
+  # qwen3.6-35b is the fast free model; operator notes say unlimited
+  # concurrency on this ID. Do not put the key in this file.
+  OPENCODE_MODEL: freeinference/qwen3.6-35b
+
+jobs:
+  comment:
+    if: |
+      github.event_name == 'issue_comment' ||
+      github.event_name == 'pull_request_review_comment'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: anomalyco/opencode/github@31406ccc51b4bd2a4e1e086b2bcaa5f7f804f26d # v1.18.18
+        env:
+          FREEINFERENCE_API_KEY: ${{ secrets.FREEINFERENCE_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          model: ${{ env.OPENCODE_MODEL }}
+          mentions: "/opencode,/oc"
+          use_github_token: true
+          share: false
+          prompt: |
+            This is agent-next/polymarket-paper-trader, a PAPER trading simulator.
+            There is no wallet and no real money. Never invent fills, prices, or P&L.
+            Never print secrets or .env values.
+
+            On /oc or /opencode:
+            - Answer, explain, or review from the repo and thread.
+            - Do not push commits unless the comment explicitly asks to fix or implement.
+            - Prefer citing tests/ and pm_trader/ over speculation.
+
+  triage:
+    if: github.event_name == 'issues'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: anomalyco/opencode/github@31406ccc51b4bd2a4e1e086b2bcaa5f7f804f26d # v1.18.18
+        env:
+          FREEINFERENCE_API_KEY: ${{ secrets.FREEINFERENCE_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          model: ${{ env.OPENCODE_MODEL }}
+          use_github_token: true
+          share: false
+          prompt: |
+            Triage this new issue on a paper-trading simulator.
+            Label if you can (bug, enhancement, documentation).
+            Ask for missing repro details. Do not write code or push.
+
+  review:
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: anomalyco/opencode/github@31406ccc51b4bd2a4e1e086b2bcaa5f7f804f26d # v1.18.18
+        env:
+          FREEINFERENCE_API_KEY: ${{ secrets.FREEINFERENCE_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          model: ${{ env.OPENCODE_MODEL }}
+          use_github_token: true
+          share: false
+          prompt: |
+            Shallow review only. Report discrete defects this diff introduces.
+            Ignore style nits and speculation. If nothing actionable, do not post LGTM.
+            Do not push commits.

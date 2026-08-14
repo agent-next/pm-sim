@@ -4,6 +4,9 @@ All notable changes to `polymarket-paper-trader` are documented here.
 
 ## Unreleased
 
+### Added
+- OpenCode GitHub Action on `/oc` / `/opencode`, new issues, and non-draft PRs. Public bot model is FreeInference `qwen3.6-35b` (`opencode.json` + `FREEINFERENCE_API_KEY`).
+
 ## [0.1.8] - 2026-08-14
 
 ### Fixed
