@@ -215,12 +215,12 @@ jobs:
           echo "PR #$pr sha=$SHA"
           missing=0
           for ctx in "Python 3.10" "Python 3.11" "Python 3.12" "Python 3.13"; do
-            state=$(gh api "repos/${REPO}/commits/${SHA}/status" \
-              --jq --arg c "$ctx" '.statuses[]? | select(.context==$c) | .state' | tail -1)
+            state=$(CTX="$ctx" gh api "repos/${REPO}/commits/${SHA}/status" \
+              --jq '.statuses[]? | select(.context == env.CTX) | .state' | tail -1)
             # combined status API may be empty; fall back to check-runs
             if [ -z "$state" ]; then
-              state=$(gh api "repos/${REPO}/commits/${SHA}/check-runs" \
-                --jq --arg c "$ctx" '.check_runs[]? | select(.name==$c) | .conclusion' | tail -1)
+              state=$(CTX="$ctx" gh api "repos/${REPO}/commits/${SHA}/check-runs" \
+                --jq '.check_runs[]? | select(.name == env.CTX) | .conclusion' | tail -1)
             fi
             echo "check $ctx -> ${state:-missing}"
             if [ "$state" != "success" ]; then

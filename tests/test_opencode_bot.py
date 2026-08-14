@@ -106,3 +106,81 @@ class TestClosedLoopWiring:
         assert "Python 3.10" in block
         assert "gh pr merge" not in block
         assert "/merge" not in block
+
+    def test_merge_ready_gh_jq_is_a_single_filter(self) -> None:
+        script = _merge_ready_script()
+        assert "--jq --arg" not in script
+        assert "env.CTX" in script
+        assert script.count("--jq") >= 2
+
+    def test_merge_ready_script_labels_when_python_checks_green(self, tmp_path: Path) -> None:
+        """Execute the shipped merge-ready shell against a stub gh + fixture JSON."""
+        import os
+        import stat
+        import subprocess
+
+        script = _merge_ready_script()
+        assert "--jq --arg" not in script
+        stub_log = tmp_path / "gh.log"
+        stub = tmp_path / "gh"
+        stub.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json, os, subprocess, sys\n"
+            "args = sys.argv[1:]\n"
+            "log = os.environ['GH_STUB_LOG']\n"
+            "with open(log, 'a', encoding='utf-8') as fh:\n"
+            "    fh.write(' '.join(args) + '\\n')\n"
+            "if args[:1] == ['api']:\n"
+            "    url = args[1]\n"
+            "    jq = args[args.index('--jq') + 1] if '--jq' in args else None\n"
+            "    if url.endswith('/pulls'):\n"
+            "        data = [{'number': 23}]\n"
+            "    elif url.endswith('/status'):\n"
+            "        data = {'statuses': []}\n"
+            "    elif url.endswith('/check-runs'):\n"
+            "        data = {'check_runs': [\n"
+            "            {'name': n, 'conclusion': 'success'}\n"
+            "            for n in ('Python 3.10', 'Python 3.11', 'Python 3.12', 'Python 3.13')\n"
+            "        ]}\n"
+            "    else:\n"
+            "        sys.exit(2)\n"
+            "    raw = json.dumps(data)\n"
+            "    if jq is None:\n"
+            "        print(raw)\n"
+            "        raise SystemExit(0)\n"
+            "    r = subprocess.run(['jq', '-r', jq], input=raw, text=True, capture_output=True)\n"
+            "    sys.stdout.write(r.stdout)\n"
+            "    raise SystemExit(r.returncode)\n"
+            "raise SystemExit(0)\n",
+            encoding="utf-8",
+        )
+        stub.chmod(stub.stat().st_mode | stat.S_IEXEC)
+        env = os.environ.copy()
+        env["PATH"] = f"{tmp_path}{os.pathsep}{env.get('PATH', '')}"
+        env["GH_STUB_LOG"] = str(stub_log)
+        env["GH_TOKEN"] = "test"
+        env["SHA"] = "deadbeef"
+        env["REPO"] = "agent-next/polymarket-paper-trader"
+        proc = subprocess.run(
+            ["bash", "-c", script],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        assert proc.returncode == 0, proc.stderr + proc.stdout
+        logged = stub_log.read_text(encoding="utf-8")
+        assert "--add-label merge-ready" in logged
+        assert "pr comment" in logged
+        assert "pr merge" not in logged
+
+
+def _merge_ready_script() -> str:
+    block = _job_block("merge-ready")
+    match = re.search(r"^        run: \|\n((?:          .*\n?)*)", block, re.M)
+    assert match, "merge-ready run: | script not found"
+    lines = []
+    for line in match.group(1).splitlines():
+        lines.append(line[10:] if line.startswith("          ") else line)
+    return "\n".join(lines) + "\n"
