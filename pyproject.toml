@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "polymarket-paper-trader"
-version = "0.1.7"
+version = "0.1.8"
 description = "Your AI agent trades Polymarket — $10k paper money, real prices, zero risk. Compete on the leaderboard."
 authors = [{name = "agent-next"}]
 license = "MIT"
@@ -21,7 +21,7 @@ classifiers = [
 dependencies = [
     "click>=8.0",
     "httpx>=0.27",
-    "mcp>=1.0",
+    "mcp>=1.28,<2",
 ]
 
 [project.optional-dependencies]
