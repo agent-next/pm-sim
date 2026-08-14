@@ -18,9 +18,10 @@ permissions:
   contents: read
 
 env:
-  # Zen free tier. Same OPENCODE_API_KEY also unlocks Go paid models if a
-  # later job points model: at opencode-go/<id>. Do not use Nemotron free.
-  OPENCODE_MODEL: opencode/deepseek-v4-flash-free
+  # Public-repo bot: Harvard SEAS FreeInference (OpenAI-compatible).
+  # qwen3.6-35b is the fast free model; operator notes say unlimited
+  # concurrency on this ID. Do not put the key in this file.
+  OPENCODE_MODEL: freeinference/qwen3.6-35b
 
 jobs:
   comment:
@@ -39,7 +40,7 @@ jobs:
           persist-credentials: false
       - uses: anomalyco/opencode/github@31406ccc51b4bd2a4e1e086b2bcaa5f7f804f26d # v1.18.18
         env:
-          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          FREEINFERENCE_API_KEY: ${{ secrets.FREEINFERENCE_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           model: ${{ env.OPENCODE_MODEL }}
@@ -68,7 +69,7 @@ jobs:
           persist-credentials: false
       - uses: anomalyco/opencode/github@31406ccc51b4bd2a4e1e086b2bcaa5f7f804f26d # v1.18.18
         env:
-          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          FREEINFERENCE_API_KEY: ${{ secrets.FREEINFERENCE_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           model: ${{ env.OPENCODE_MODEL }}
@@ -92,7 +93,7 @@ jobs:
           persist-credentials: false
       - uses: anomalyco/opencode/github@31406ccc51b4bd2a4e1e086b2bcaa5f7f804f26d # v1.18.18
         env:
-          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          FREEINFERENCE_API_KEY: ${{ secrets.FREEINFERENCE_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           model: ${{ env.OPENCODE_MODEL }}

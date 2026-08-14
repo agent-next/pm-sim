@@ -254,7 +254,7 @@ npx clawhub install polymarket-paper-trader
 
 ## GitHub bot
 
-Comment `/oc` or `/opencode` on an issue or PR. New issues get a triage reply; non-draft PRs get a shallow review. It uses OpenCode Zen's free `deepseek-v4-flash-free` model (no wallet, no real trades). Sessions are not shared.
+Comment `/oc` or `/opencode` on an issue or PR. New issues get a triage reply; non-draft PRs get a shallow review. The public bot uses [FreeInference](https://freeinference.org) (`qwen3.6-35b`) via a repo Actions secret — no wallet, no real trades. Sessions are not shared.
 
 ## Tests
 
