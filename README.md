@@ -109,7 +109,7 @@ Global flags: `--data-dir PATH`, `--account NAME` (or env vars `PM_TRADER_DATA_D
 
 ## MCP server — what your agent can do
 
-Your agent gets 26 tools via the [Model Context Protocol](https://modelcontextprotocol.io):
+Your agent gets 30 tools via the [Model Context Protocol](https://modelcontextprotocol.io):
 
 ```bash
 pm-trader-mcp  # starts on stdio
@@ -136,6 +136,9 @@ Add to your Claude Code config:
 | `reset_account` | Wipe all data and start fresh |
 | `search_markets` | Find markets by keyword |
 | `list_markets` | Browse markets sorted by volume/liquidity |
+| `get_tags` | All market categories/tags for filtering |
+| `get_markets_by_tag` | Markets in a specific category/tag |
+| `get_event` | Event details — a group of related markets |
 | `get_market` | Market details with outcomes and prices |
 | `get_order_book` | Live order book snapshot (bids + asks) |
 | `watch_prices` | Monitor prices for multiple markets |
@@ -146,6 +149,7 @@ Add to your Claude Code config:
 | `place_limit_order` | Limit order — stays open until filled or cancelled/expired |
 | `list_orders` | Pending limit orders |
 | `cancel_order` | Cancel a pending order |
+| `cancel_all_orders` | Cancel all pending limit orders at once |
 | `check_orders` | Execute pending orders against live prices |
 | `stats` | Win rate, ROI, profit, max drawdown |
 | `resolve` | Resolve a closed market (winners get $1/share) |
