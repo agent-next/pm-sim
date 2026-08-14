@@ -254,7 +254,7 @@ npx clawhub install polymarket-paper-trader
 
 ## GitHub bot
 
-Comment `/oc` or `/opencode` on an issue or PR. New issues get a triage reply; non-draft PRs get a shallow review. The public bot uses [FreeInference](https://freeinference.org) (`qwen3.6-35b`) via a repo Actions secret — no wallet, no real trades. Sessions are not shared.
+Comment `/oc` or `/opencode` on an issue or PR. New issues get a triage reply; non-draft PRs get a shallow review. Implementation starts only if a human adds `bot:implement` or comments `/oc implement` (FreeInference `deepseek-v4-flash`, push via `OC_PUSH_TOKEN` so Tests can run). When Python 3.10–3.13 are green the `merge-ready` job labels the PR; it does **not** merge. Q&A / triage / review stay on `qwen3.6-35b`. No wallet, no real trades. Sessions are not shared.
 
 ## Tests
 

@@ -7,6 +7,7 @@ All notable changes to `polymarket-paper-trader` are documented here.
 ### Added
 - OpenCode GitHub Action on `/oc` / `/opencode`, new issues, and non-draft PRs. Public bot model is FreeInference `qwen3.6-35b` (`opencode.json` + `FREEINFERENCE_API_KEY`).
 - Preflight step fails the `/oc` jobs when `FREEINFERENCE_API_KEY` is empty; `tests/test_opencode_bot.py` pins the shipped workflow and provider.
+- Closed loop (no self-merge): `implement` only on `bot:implement` or `/oc implement` (`deepseek-v4-flash` + `OC_PUSH_TOKEN`); `review` stays comment-only; `merge-ready` labels when Python 3.10–3.13 are green.
 
 ## [0.1.8] - 2026-08-14
 

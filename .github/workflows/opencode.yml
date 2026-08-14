@@ -6,28 +6,32 @@ on:
   pull_request_review_comment:
     types: [created]
   issues:
-    types: [opened]
+    types: [opened, labeled]
   pull_request:
     types: [opened, synchronize, ready_for_review]
+  workflow_run:
+    workflows: ["Tests"]
+    types: [completed]
 
 concurrency:
-  group: opencode-${{ github.event.pull_request.number || github.event.issue.number || github.ref }}
+  group: opencode-${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.id || github.ref }}
   cancel-in-progress: false
 
 permissions:
   contents: read
 
 env:
-  # Public-repo bot: Harvard SEAS FreeInference (OpenAI-compatible).
-  # qwen3.6-35b is the fast free model; operator notes say unlimited
-  # concurrency on this ID. Do not put the key in this file.
+  # Public Q&A / triage / review: fast FreeInference pool.
+  # Implement uses OPENCODE_IMPLEMENT_MODEL (slow pool, 1 in-flight per key).
   OPENCODE_MODEL: freeinference/qwen3.6-35b
+  OPENCODE_IMPLEMENT_MODEL: freeinference/deepseek-v4-flash
 
 jobs:
   comment:
     if: |
-      github.event_name == 'issue_comment' ||
-      github.event_name == 'pull_request_review_comment'
+      (github.event_name == 'issue_comment' ||
+       github.event_name == 'pull_request_review_comment') &&
+      !contains(github.event.comment.body, '/oc implement')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -63,11 +67,11 @@ jobs:
 
             On /oc or /opencode:
             - Answer, explain, or review from the repo and thread.
-            - Do not push commits unless the comment explicitly asks to fix or implement.
+            - Do not push commits. Implementation is a different job (/oc implement).
             - Prefer citing tests/ and pm_trader/ over speculation.
 
   triage:
-    if: github.event_name == 'issues'
+    if: github.event_name == 'issues' && github.event.action == 'opened'
     runs-on: ubuntu-latest
     permissions:
       issues: write
@@ -97,6 +101,60 @@ jobs:
             Triage this new issue on a paper-trading simulator.
             Label if you can (bug, enhancement, documentation).
             Ask for missing repro details. Do not write code or push.
+            Do not add bot:implement unless a human already asked for an implementation.
+
+  implement:
+    if: |
+      (github.event_name == 'issues' &&
+       github.event.action == 'labeled' &&
+       github.event.label.name == 'bot:implement') ||
+      (github.event_name == 'issue_comment' &&
+       contains(github.event.comment.body, '/oc implement'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Preflight FreeInference key
+        env:
+          FREEINFERENCE_API_KEY: ${{ secrets.FREEINFERENCE_API_KEY }}
+        run: |
+          if [ -z "$FREEINFERENCE_API_KEY" ]; then
+            echo "FREEINFERENCE_API_KEY is empty" >&2
+            exit 1
+          fi
+          echo "FREEINFERENCE_API_KEY is set (len=${#FREEINFERENCE_API_KEY})"
+      - name: Preflight OC_PUSH_TOKEN
+        env:
+          OC_PUSH_TOKEN: ${{ secrets.OC_PUSH_TOKEN }}
+        run: |
+          if [ -z "$OC_PUSH_TOKEN" ]; then
+            echo "OC_PUSH_TOKEN is empty — implement cannot push a Tests-triggering PR" >&2
+            exit 1
+          fi
+          echo "OC_PUSH_TOKEN is set (len=${#OC_PUSH_TOKEN})"
+      - uses: anomalyco/opencode/github@31406ccc51b4bd2a4e1e086b2bcaa5f7f804f26d # v1.18.18
+        env:
+          FREEINFERENCE_API_KEY: ${{ secrets.FREEINFERENCE_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.OC_PUSH_TOKEN }}
+        with:
+          model: freeinference/deepseek-v4-flash
+          mentions: "/oc implement"
+          use_github_token: true
+          share: false
+          prompt: |
+            Implement the requested change on this paper-trading simulator.
+            There is no wallet and no real money. Never invent fills or P&L.
+            Never print secrets.
+
+            - Create or update a branch and open a PR. Do not merge.
+            - Prefer tests first. Cite tests/ and pm_trader/.
+            - Do not approve the PR. Do not add merge-ready yourself.
 
   review:
     if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
@@ -129,4 +187,50 @@ jobs:
           prompt: |
             Shallow review only. Report discrete defects this diff introduces.
             Ignore style nits and speculation. If nothing actionable, do not post LGTM.
-            Do not push commits.
+            Do not push commits. Do not approve. Do not merge.
+
+  merge-ready:
+    if: |
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      checks: read
+    steps:
+      - name: Label merge-ready when required Python checks are green
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          pr=$(gh api "repos/${REPO}/commits/${SHA}/pulls" --jq '.[0].number // empty')
+          if [ -z "$pr" ]; then
+            echo "No PR for $SHA"
+            exit 0
+          fi
+          echo "PR #$pr sha=$SHA"
+          missing=0
+          for ctx in "Python 3.10" "Python 3.11" "Python 3.12" "Python 3.13"; do
+            state=$(gh api "repos/${REPO}/commits/${SHA}/status" \
+              --jq --arg c "$ctx" '.statuses[]? | select(.context==$c) | .state' | tail -1)
+            # combined status API may be empty; fall back to check-runs
+            if [ -z "$state" ]; then
+              state=$(gh api "repos/${REPO}/commits/${SHA}/check-runs" \
+                --jq --arg c "$ctx" '.check_runs[]? | select(.name==$c) | .conclusion' | tail -1)
+            fi
+            echo "check $ctx -> ${state:-missing}"
+            if [ "$state" != "success" ]; then
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "Required Python 3.10–3.13 checks are not all success; skip merge-ready"
+            exit 0
+          fi
+          gh label create merge-ready --repo "$REPO" --force --color 0E8A16 --description "CI green; human may merge" || true
+          gh pr edit "$pr" --repo "$REPO" --add-label merge-ready
+          gh pr comment "$pr" --repo "$REPO" --body "merge-ready: Python 3.10–3.13 are green on \`${SHA}\`. A human (not this job) may merge. This job does not merge."
