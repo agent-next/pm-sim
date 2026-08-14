@@ -4,6 +4,12 @@ All notable changes to `polymarket-paper-trader` are documented here.
 
 ## Unreleased
 
+## [0.1.8] - 2026-08-14
+
+### Fixed
+- **CRITICAL**: Pin `mcp>=1.28,<2` — MCP SDK 2.0.0 (2026-07-28) removed `mcp.server.fastmcp`, breaking every fresh install of the MCP server (`pm-trader-mcp` failed with `ModuleNotFoundError`). SDK 1.x stays on security-maintenance per upstream; migration to `MCPServer` tracked for a future release.
+- Sync stale version fields: `server.json` 0.1.6 → 0.1.8, `SKILL.md` 0.1.7 → 0.1.8
+
 ## [0.1.7] - 2026-03-01
 
 ### Added
