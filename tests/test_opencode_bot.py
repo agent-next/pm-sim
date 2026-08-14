@@ -59,17 +59,23 @@ class TestPublicBotWiring:
 
     def test_jobs_pass_freeinference_secret(self) -> None:
         text = _workflow_text()
-        for job in ("comment", "triage", "implement", "review"):
+        for job in ("comment", "triage", "review"):
             block = _job_block(job)
-            assert "- uses: ./.github/actions/preflight" in block, job
-            assert "secret: ${{ secrets.FREEINFERENCE_API_KEY }}" in block, job
+            assert "name: Preflight FreeInference key" in block, job
+            assert "FREEINFERENCE_API_KEY: ${{ secrets.FREEINFERENCE_PUBLIC_KEY }}" in block, job
+        implement = _job_block("implement")
+        assert "FREEINFERENCE_API_KEY: ${{ secrets.FREEINFERENCE_API_KEY }}" in implement
         assert "secrets.OPENCODE_API_KEY" not in text
 
     def test_preflight_fails_closed_without_key(self) -> None:
         """Missing/empty secret must fail the job before OpenCode starts."""
         text = _workflow_text()
-        assert text.count("- uses: ./.github/actions/preflight") == 4
-        assert "secrets.FREEINFERENCE_API_KEY" in text
+        assert text.count("name: Preflight FreeInference key") == 4
+        assert "FREEINFERENCE_API_KEY is empty" in text
+        assert "secrets.FREEINFERENCE_PUBLIC_KEY" in text
+        # Local actions resolve from the checked-out tree; on PR review-comment
+        # events that tree is PR-controlled, so preflight must stay inline.
+        assert "uses: ./.github/actions/" not in text
 
 
 class TestClosedLoopWiring:
@@ -107,8 +113,8 @@ class TestClosedLoopWiring:
 
     def test_implement_passes_freeinference_to_preflight(self) -> None:
         block = _job_block("implement")
-        assert "- uses: ./.github/actions/preflight" in block
-        assert "secret: ${{ secrets.FREEINFERENCE_API_KEY }}" in block
+        assert "name: Preflight FreeInference key" in block
+        assert "FREEINFERENCE_API_KEY: ${{ secrets.FREEINFERENCE_API_KEY }}" in block
 
     def test_implement_gated_to_trusted_actors(self) -> None:
         block = _job_block("implement")
@@ -142,6 +148,7 @@ class TestClosedLoopWiring:
         assert "Python 3.10" in block
         assert "gh pr merge" not in block
         assert "/merge" not in block
+        assert "--remove-label merge-ready" in block
         assert "workflow_dispatch" in block
 
     def test_merge_ready_gh_jq_is_a_single_filter(self) -> None:
@@ -259,6 +266,30 @@ class TestMergeReadyScript:
         assert "head moved" in proc.stdout
         assert "--add-label merge-ready" not in logged
 
+    def test_removes_label_when_tests_conclusion_failure(self, tmp_path: Path) -> None:
+        proc, logged = _run_merge_ready(
+            tmp_path, [OPEN_PR], [], GREEN_CHECKS, pr_labels="merge-ready\n", conclusion="failure"
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert "--remove-label merge-ready" in logged
+        assert "--add-label merge-ready" not in logged
+
+    def test_failure_without_label_exits_cleanly(self, tmp_path: Path) -> None:
+        proc, logged = _run_merge_ready(tmp_path, [OPEN_PR], [], GREEN_CHECKS, conclusion="cancelled")
+        assert proc.returncode == 0, proc.stderr
+        assert "--remove-label" not in logged
+        assert "--add-label" not in logged
+
+    def test_failure_when_pr_head_moved_does_not_strip(self, tmp_path: Path) -> None:
+        """A delayed failure for an old SHA must not touch a moved-on PR's label."""
+        stale = {"number": 23, "state": "open", "head": {"sha": "cafebabe"}}
+        proc, logged = _run_merge_ready(
+            tmp_path, [stale], [], [], pr_labels="merge-ready\n", conclusion="failure"
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert "No open PR" in proc.stdout
+        assert "--remove-label" not in logged
+
     def test_exits_cleanly_when_no_pr_for_sha(self, tmp_path: Path) -> None:
         proc, logged = _run_merge_ready(tmp_path, [], [], [])
         assert proc.returncode == 0, proc.stderr
@@ -273,6 +304,7 @@ def _run_merge_ready(
     check_runs: list,
     pr_labels: str = "",
     pr_head: str = "deadbeef",
+    conclusion: str = "success",
 ) -> tuple[subprocess.CompletedProcess[str], str]:
     script = _merge_ready_script()
     stub_log = tmp_path / "gh.log"
@@ -289,6 +321,7 @@ def _run_merge_ready(
     env["GH_STUB_PR_HEAD"] = pr_head
     env["GH_TOKEN"] = "test"
     env["SHA"] = "deadbeef"
+    env["CONCLUSION"] = conclusion
     env["REPO"] = "agent-next/polymarket-paper-trader"
     proc = subprocess.run(
         ["bash", "-c", script],
@@ -318,8 +351,8 @@ class TestPreflightFailsClosed:
     @pytest.mark.parametrize("var_name", ["FREEINFERENCE_API_KEY"])
     def test_empty_secret_exits_nonzero(self, var_name: str) -> None:
         proc = subprocess.run(
-            ["bash", "-c", _preflight_script()],
-            env={"PATH": "/usr/bin:/bin", "VALUE": "", "VAR_NAME": var_name},
+            ["bash", "-c", _run_block("Preflight FreeInference key")],
+            env={"PATH": "/usr/bin:/bin", var_name: ""},
             capture_output=True,
             text=True,
             timeout=10,
@@ -328,12 +361,5 @@ class TestPreflightFailsClosed:
         assert f"{var_name} is empty" in proc.stderr
 
 
-def _preflight_script() -> str:
-    action = ROOT / ".github" / "actions" / "preflight" / "action.yml"
-    match = re.search(r"^      run: \|\n((?:        .*\n?)+)", action.read_text(encoding="utf-8"), re.M)
-    assert match, "preflight run block not found"
-    return "\n".join(line[8:] for line in match.group(1).splitlines()) + "\n"
-
-
 def _merge_ready_script() -> str:
-    return _run_block("Label merge-ready when required Python checks are green")
+    return _run_block("Reconcile merge-ready label with Tests result")

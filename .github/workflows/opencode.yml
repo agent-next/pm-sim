@@ -42,13 +42,18 @@ jobs:
         with:
           fetch-depth: 1
           persist-credentials: false
-      - uses: ./.github/actions/preflight
-        with:
-          name: FREEINFERENCE_API_KEY
-          secret: ${{ secrets.FREEINFERENCE_API_KEY }}
+      - name: Preflight FreeInference key
+        env:
+          FREEINFERENCE_API_KEY: ${{ secrets.FREEINFERENCE_PUBLIC_KEY }}
+        run: |
+          if [ -z "$FREEINFERENCE_API_KEY" ]; then
+            echo "FREEINFERENCE_API_KEY is empty" >&2
+            exit 1
+          fi
+          echo "FREEINFERENCE_API_KEY is set"
       - uses: anomalyco/opencode/github@31406ccc51b4bd2a4e1e086b2bcaa5f7f804f26d # v1.18.18
         env:
-          FREEINFERENCE_API_KEY: ${{ secrets.FREEINFERENCE_API_KEY }}
+          FREEINFERENCE_API_KEY: ${{ secrets.FREEINFERENCE_PUBLIC_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           model: ${{ env.OPENCODE_MODEL }}
@@ -76,13 +81,18 @@ jobs:
         with:
           fetch-depth: 1
           persist-credentials: false
-      - uses: ./.github/actions/preflight
-        with:
-          name: FREEINFERENCE_API_KEY
-          secret: ${{ secrets.FREEINFERENCE_API_KEY }}
+      - name: Preflight FreeInference key
+        env:
+          FREEINFERENCE_API_KEY: ${{ secrets.FREEINFERENCE_PUBLIC_KEY }}
+        run: |
+          if [ -z "$FREEINFERENCE_API_KEY" ]; then
+            echo "FREEINFERENCE_API_KEY is empty" >&2
+            exit 1
+          fi
+          echo "FREEINFERENCE_API_KEY is set"
       - uses: anomalyco/opencode/github@31406ccc51b4bd2a4e1e086b2bcaa5f7f804f26d # v1.18.18
         env:
-          FREEINFERENCE_API_KEY: ${{ secrets.FREEINFERENCE_API_KEY }}
+          FREEINFERENCE_API_KEY: ${{ secrets.FREEINFERENCE_PUBLIC_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           model: ${{ env.OPENCODE_MODEL }}
@@ -126,10 +136,15 @@ jobs:
         with:
           fetch-depth: 1
           persist-credentials: false
-      - uses: ./.github/actions/preflight
-        with:
-          name: FREEINFERENCE_API_KEY
-          secret: ${{ secrets.FREEINFERENCE_API_KEY }}
+      - name: Preflight FreeInference key
+        env:
+          FREEINFERENCE_API_KEY: ${{ secrets.FREEINFERENCE_API_KEY }}
+        run: |
+          if [ -z "$FREEINFERENCE_API_KEY" ]; then
+            echo "FREEINFERENCE_API_KEY is empty" >&2
+            exit 1
+          fi
+          echo "FREEINFERENCE_API_KEY is set"
       - uses: anomalyco/opencode/github@31406ccc51b4bd2a4e1e086b2bcaa5f7f804f26d # v1.18.18
         env:
           FREEINFERENCE_API_KEY: ${{ secrets.FREEINFERENCE_API_KEY }}
@@ -177,13 +192,18 @@ jobs:
         with:
           fetch-depth: 1
           persist-credentials: false
-      - uses: ./.github/actions/preflight
-        with:
-          name: FREEINFERENCE_API_KEY
-          secret: ${{ secrets.FREEINFERENCE_API_KEY }}
+      - name: Preflight FreeInference key
+        env:
+          FREEINFERENCE_API_KEY: ${{ secrets.FREEINFERENCE_PUBLIC_KEY }}
+        run: |
+          if [ -z "$FREEINFERENCE_API_KEY" ]; then
+            echo "FREEINFERENCE_API_KEY is empty" >&2
+            exit 1
+          fi
+          echo "FREEINFERENCE_API_KEY is set"
       - uses: anomalyco/opencode/github@31406ccc51b4bd2a4e1e086b2bcaa5f7f804f26d # v1.18.18
         env:
-          FREEINFERENCE_API_KEY: ${{ secrets.FREEINFERENCE_API_KEY }}
+          FREEINFERENCE_API_KEY: ${{ secrets.FREEINFERENCE_PUBLIC_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           model: ${{ env.OPENCODE_MODEL }}
@@ -197,7 +217,6 @@ jobs:
   merge-ready:
     if: |
       github.event_name == 'workflow_run' &&
-      github.event.workflow_run.conclusion == 'success' &&
       (github.event.workflow_run.event == 'pull_request' ||
        github.event.workflow_run.event == 'workflow_dispatch' ||
        github.event.workflow_run.event == 'push')
@@ -210,20 +229,30 @@ jobs:
       checks: read
       statuses: read
     steps:
-      - name: Label merge-ready when required Python checks are green
+      - name: Reconcile merge-ready label with Tests result
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SHA: ${{ github.event.workflow_run.head_sha }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           pr=$(gh api "repos/${REPO}/commits/${SHA}/pulls" \
             --jq '[.[] | select(.state == "open" and .head.sha == env.SHA)][0].number // empty')
           if [ -z "$pr" ]; then
-            echo "No open PR with head $SHA (none or stale); nothing to label"
+            echo "No open PR with head $SHA (none or stale); nothing to reconcile"
             exit 0
           fi
-          echo "PR #$pr sha=$SHA"
+          echo "PR #$pr sha=$SHA conclusion=$CONCLUSION"
+          if [ "$CONCLUSION" != "success" ]; then
+            if gh pr view "$pr" --repo "$REPO" --json labels --jq '.labels[].name' | grep -qx merge-ready; then
+              gh pr edit "$pr" --repo "$REPO" --remove-label merge-ready
+              echo "Tests ${CONCLUSION}; removed merge-ready from PR #$pr"
+            else
+              echo "Tests ${CONCLUSION}; merge-ready not set on PR #$pr"
+            fi
+            exit 0
+          fi
           if gh pr view "$pr" --repo "$REPO" --json labels --jq '.labels[].name' | grep -qx merge-ready; then
             echo "merge-ready already set on PR #$pr"
             exit 0
