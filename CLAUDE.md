@@ -12,7 +12,7 @@ Paper trading simulator for Polymarket. Built for AI agents. Python 3.10+, SQLit
 # Install
 pip install -e ".[dev]"
 
-# Tests (615 non-live + 42 live = 657 total, 100% coverage)
+# Tests (620 non-live + 42 live = 662 total, 100% coverage)
 python3 -m pytest tests/ -x -q -m "not live"            # fast, skip live API tests
 python3 -m pytest tests/ -v                              # verbose
 python3 -m pytest tests/ --cov=pm_trader --cov-report=term-missing  # coverage
