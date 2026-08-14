@@ -1,7 +1,7 @@
 ---
 name: polymarket-paper-trader
 description: "Everyone's trading Polymarket with AI agents. Practice first — $10k paper money, real order books, zero risk. No wallet, no API keys, no real money. Then compete on the leaderboard."
-version: 0.1.7
+version: 0.1.8
 metadata:
   clawdbot:
     requires:
