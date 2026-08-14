@@ -1,0 +1,25 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "freeinference": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "FreeInference",
+      "env": ["FREEINFERENCE_API_KEY"],
+      "options": {
+        "baseURL": "https://freeinference.org/v1",
+        "apiKey": "{env:FREEINFERENCE_API_KEY}"
+      },
+      "models": {
+        "qwen3.6-35b": {
+          "name": "Qwen3.6 35B"
+        },
+        "glm-5.1": {
+          "name": "GLM-5.1"
+        },
+        "deepseek-v4-flash": {
+          "name": "DeepSeek V4 Flash"
+        }
+      }
+    }
+  }
+}
