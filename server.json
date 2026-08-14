@@ -3,12 +3,12 @@
   "name": "io.github.agent-next/polymarket-paper-trader",
   "title": "Polymarket Paper Trader",
   "description": "Paper trading simulator for Polymarket prediction markets. $10k paper money, real order books, zero risk. Built for AI agents.",
-  "version": "0.1.6",
+  "version": "0.1.8",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "polymarket-paper-trader",
-      "version": "0.1.6",
+      "version": "0.1.8",
       "transport": {
         "type": "stdio"
       }
