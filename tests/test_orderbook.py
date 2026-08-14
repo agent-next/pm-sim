@@ -386,8 +386,12 @@ class TestFee200BpsBuy:
         result = simulate_buy_fill(multi_level_book, 100.0, fee_rate_bps=200)
 
         # avg_price ~0.66468, so min(0.66468, 0.33532) = 0.33532
-        # fee = 0.02 * 0.33532 * 100 = 0.67064
-        expected_fee = (200 / 10_000) * min(result.avg_price, 1 - result.avg_price) * 100.0
+        # fee = 0.02 * 0.33532 * filled shares
+        expected_fee = (
+            (200 / 10_000)
+            * min(result.avg_price, 1 - result.avg_price)
+            * result.total_shares
+        )
         assert result.fee == pytest.approx(expected_fee)
         assert result.fee > 0
 
@@ -656,7 +660,7 @@ class TestDesignDocExample:
 
     def test_fee_example_200bps(self) -> None:
         # Design doc: 200bps market at avg_price 0.6647
-        # fee = 0.02 * min(0.6647, 0.3353) * 100 = 0.02 * 0.3353 * 100 = 0.6706
+        # fee = 0.02 * min(0.6647, 0.3353) * filled shares
         book = OrderBook(
             bids=[OrderBookLevel(price=0.64, size=150.0)],
             asks=[
@@ -666,5 +670,9 @@ class TestDesignDocExample:
         )
         result = simulate_buy_fill(book, 100.0, fee_rate_bps=200)
 
-        expected_fee = (200 / 10_000) * min(result.avg_price, 1.0 - result.avg_price) * 100.0
+        expected_fee = (
+            (200 / 10_000)
+            * min(result.avg_price, 1.0 - result.avg_price)
+            * result.total_shares
+        )
         assert result.fee == pytest.approx(expected_fee)
