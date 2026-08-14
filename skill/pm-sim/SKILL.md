@@ -12,4 +12,4 @@ This skill has been renamed. Install the new version:
 npx clawhub install polymarket-paper-trader
 ```
 
-All features, 26 MCP tools, and 597 tests are in the new package.
+All features, 30 MCP tools, and 615 tests are in the new package.
