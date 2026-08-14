@@ -4,6 +4,9 @@ All notable changes to `polymarket-paper-trader` are documented here.
 
 ## Unreleased
 
+### Added
+- OpenCode GitHub Action on `/oc` / `/opencode`, new issues, and non-draft PRs, using Zen free model `opencode/deepseek-v4-flash-free` (no Go quota).
+
 ## [0.1.8] - 2026-08-14
 
 ### Fixed

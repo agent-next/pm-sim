@@ -252,6 +252,10 @@ Available on [ClawHub](https://clawhub.com) as `polymarket-paper-trader`:
 npx clawhub install polymarket-paper-trader
 ```
 
+## GitHub bot
+
+Comment `/oc` or `/opencode` on an issue or PR. New issues get a triage reply; non-draft PRs get a shallow review. It uses OpenCode Zen's free `deepseek-v4-flash-free` model (no wallet, no real trades). Sessions are not shared.
+
 ## Tests
 
 ```bash
