@@ -31,10 +31,10 @@ jobs:
     if: |
       (github.event_name == 'issue_comment' ||
        github.event_name == 'pull_request_review_comment') &&
-      !contains(github.event.comment.body, '/oc implement')
+      !startsWith(github.event.comment.body, '/oc implement')
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
-      contents: write
       issues: write
       pull-requests: write
     steps:
@@ -42,15 +42,10 @@ jobs:
         with:
           fetch-depth: 1
           persist-credentials: false
-      - name: Preflight FreeInference key
-        env:
-          FREEINFERENCE_API_KEY: ${{ secrets.FREEINFERENCE_API_KEY }}
-        run: |
-          if [ -z "$FREEINFERENCE_API_KEY" ]; then
-            echo "FREEINFERENCE_API_KEY is empty" >&2
-            exit 1
-          fi
-          echo "FREEINFERENCE_API_KEY is set (len=${#FREEINFERENCE_API_KEY})"
+      - uses: ./.github/actions/preflight
+        with:
+          name: FREEINFERENCE_API_KEY
+          secret: ${{ secrets.FREEINFERENCE_API_KEY }}
       - uses: anomalyco/opencode/github@31406ccc51b4bd2a4e1e086b2bcaa5f7f804f26d # v1.18.18
         env:
           FREEINFERENCE_API_KEY: ${{ secrets.FREEINFERENCE_API_KEY }}
@@ -73,6 +68,7 @@ jobs:
   triage:
     if: github.event_name == 'issues' && github.event.action == 'opened'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       issues: write
     steps:
@@ -80,15 +76,10 @@ jobs:
         with:
           fetch-depth: 1
           persist-credentials: false
-      - name: Preflight FreeInference key
-        env:
-          FREEINFERENCE_API_KEY: ${{ secrets.FREEINFERENCE_API_KEY }}
-        run: |
-          if [ -z "$FREEINFERENCE_API_KEY" ]; then
-            echo "FREEINFERENCE_API_KEY is empty" >&2
-            exit 1
-          fi
-          echo "FREEINFERENCE_API_KEY is set (len=${#FREEINFERENCE_API_KEY})"
+      - uses: ./.github/actions/preflight
+        with:
+          name: FREEINFERENCE_API_KEY
+          secret: ${{ secrets.FREEINFERENCE_API_KEY }}
       - uses: anomalyco/opencode/github@31406ccc51b4bd2a4e1e086b2bcaa5f7f804f26d # v1.18.18
         env:
           FREEINFERENCE_API_KEY: ${{ secrets.FREEINFERENCE_API_KEY }}
@@ -108,42 +99,43 @@ jobs:
       (github.event_name == 'issues' &&
        github.event.action == 'labeled' &&
        github.event.label.name == 'bot:implement') ||
-      (github.event_name == 'issue_comment' &&
-       contains(github.event.comment.body, '/oc implement'))
+      ((github.event_name == 'issue_comment' ||
+        github.event_name == 'pull_request_review_comment') &&
+       startsWith(github.event.comment.body, '/oc implement'))
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: write
       issues: write
       pull-requests: write
+      actions: write
     steps:
+      - name: Gate to trusted actors
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          perm=$(gh api "repos/${REPO}/collaborators/${ACTOR}/permission" --jq .permission 2>/dev/null || echo none)
+          case "$perm" in
+            admin|maintain|write) echo "actor ${ACTOR} has ${perm}; implement allowed" ;;
+            *) echo "actor ${ACTOR} lacks write access (${perm}); refusing implement" >&2; exit 1 ;;
+          esac
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 1
           persist-credentials: false
-      - name: Preflight FreeInference key
-        env:
-          FREEINFERENCE_API_KEY: ${{ secrets.FREEINFERENCE_API_KEY }}
-        run: |
-          if [ -z "$FREEINFERENCE_API_KEY" ]; then
-            echo "FREEINFERENCE_API_KEY is empty" >&2
-            exit 1
-          fi
-          echo "FREEINFERENCE_API_KEY is set (len=${#FREEINFERENCE_API_KEY})"
-      - name: Preflight OC_PUSH_TOKEN
-        env:
-          OC_PUSH_TOKEN: ${{ secrets.OC_PUSH_TOKEN }}
-        run: |
-          if [ -z "$OC_PUSH_TOKEN" ]; then
-            echo "OC_PUSH_TOKEN is empty — implement cannot push a Tests-triggering PR" >&2
-            exit 1
-          fi
-          echo "OC_PUSH_TOKEN is set (len=${#OC_PUSH_TOKEN})"
+      - uses: ./.github/actions/preflight
+        with:
+          name: FREEINFERENCE_API_KEY
+          secret: ${{ secrets.FREEINFERENCE_API_KEY }}
       - uses: anomalyco/opencode/github@31406ccc51b4bd2a4e1e086b2bcaa5f7f804f26d # v1.18.18
         env:
           FREEINFERENCE_API_KEY: ${{ secrets.FREEINFERENCE_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.OC_PUSH_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          model: freeinference/deepseek-v4-flash
+          model: ${{ env.OPENCODE_IMPLEMENT_MODEL }}
           mentions: "/oc implement"
           use_github_token: true
           share: false
@@ -155,10 +147,28 @@ jobs:
             - Create or update a branch and open a PR. Do not merge.
             - Prefer tests first. Cite tests/ and pm_trader/.
             - Do not approve the PR. Do not add merge-ready yourself.
+      - name: Dispatch Tests after GITHUB_TOKEN push
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          branch=$(git rev-parse --abbrev-ref HEAD)
+          if [ "$branch" = "HEAD" ] || [ "$branch" = "main" ]; then
+            branch=$(gh pr list --repo "$REPO" --state open --json headRefName,author,updatedAt \
+              --jq '[.[] | select(.author.login=="github-actions[bot]")] | sort_by(.updatedAt) | reverse | .[0].headRefName // empty')
+          fi
+          if [ -z "$branch" ]; then
+            echo "no implement branch; skip Tests dispatch"
+            exit 0
+          fi
+          echo "Dispatching Tests on ${branch}"
+          gh workflow run Tests --repo "$REPO" --ref "$branch"
 
   review:
     if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       pull-requests: write
@@ -167,15 +177,10 @@ jobs:
         with:
           fetch-depth: 1
           persist-credentials: false
-      - name: Preflight FreeInference key
-        env:
-          FREEINFERENCE_API_KEY: ${{ secrets.FREEINFERENCE_API_KEY }}
-        run: |
-          if [ -z "$FREEINFERENCE_API_KEY" ]; then
-            echo "FREEINFERENCE_API_KEY is empty" >&2
-            exit 1
-          fi
-          echo "FREEINFERENCE_API_KEY is set (len=${#FREEINFERENCE_API_KEY})"
+      - uses: ./.github/actions/preflight
+        with:
+          name: FREEINFERENCE_API_KEY
+          secret: ${{ secrets.FREEINFERENCE_API_KEY }}
       - uses: anomalyco/opencode/github@31406ccc51b4bd2a4e1e086b2bcaa5f7f804f26d # v1.18.18
         env:
           FREEINFERENCE_API_KEY: ${{ secrets.FREEINFERENCE_API_KEY }}
@@ -193,12 +198,17 @@ jobs:
     if: |
       github.event_name == 'workflow_run' &&
       github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'pull_request'
+      (github.event.workflow_run.event == 'pull_request' ||
+       github.event.workflow_run.event == 'workflow_dispatch' ||
+       github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       pull-requests: write
+      issues: write
       checks: read
+      statuses: read
     steps:
       - name: Label merge-ready when required Python checks are green
         env:
@@ -207,28 +217,47 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          pr=$(gh api "repos/${REPO}/commits/${SHA}/pulls" --jq '.[0].number // empty')
+          pr=$(gh api "repos/${REPO}/commits/${SHA}/pulls" \
+            --jq '[.[] | select(.state == "open" and .head.sha == env.SHA)][0].number // empty')
           if [ -z "$pr" ]; then
-            echo "No PR for $SHA"
+            echo "No open PR with head $SHA (none or stale); nothing to label"
             exit 0
           fi
           echo "PR #$pr sha=$SHA"
-          missing=0
+          if gh pr view "$pr" --repo "$REPO" --json labels --jq '.labels[].name' | grep -qx merge-ready; then
+            echo "merge-ready already set on PR #$pr"
+            exit 0
+          fi
+          context_gone=0
+          not_green=0
           for ctx in "Python 3.10" "Python 3.11" "Python 3.12" "Python 3.13"; do
-            state=$(CTX="$ctx" gh api "repos/${REPO}/commits/${SHA}/status" \
-              --jq '.statuses[]? | select(.context == env.CTX) | .state' | tail -1)
-            # combined status API may be empty; fall back to check-runs
-            if [ -z "$state" ]; then
-              state=$(CTX="$ctx" gh api "repos/${REPO}/commits/${SHA}/check-runs" \
-                --jq '.check_runs[]? | select(.name == env.CTX) | .conclusion' | tail -1)
+            state=$(CTX="$ctx" gh api "repos/${REPO}/commits/${SHA}/check-runs" \
+              --jq '[.check_runs[]? | select(.name == env.CTX)] | last
+                    | if . == null then "absent" elif .conclusion == null then "pending" else .conclusion end')
+            # legacy statuses API fallback when the context is not a check-run
+            if [ "$state" = "absent" ]; then
+              state=$(CTX="$ctx" gh api "repos/${REPO}/commits/${SHA}/status" \
+                --jq '[.statuses[]? | select(.context == env.CTX)] | last
+                      | if . == null then "absent" else .state end')
             fi
-            echo "check $ctx -> ${state:-missing}"
-            if [ "$state" != "success" ]; then
-              missing=1
-            fi
+            echo "check $ctx -> $state"
+            case "$state" in
+              success) ;;
+              absent) context_gone=1 ;;
+              *) not_green=1 ;;
+            esac
           done
-          if [ "$missing" -ne 0 ]; then
+          if [ "$context_gone" -ne 0 ]; then
+            echo "Required check context missing entirely for $SHA (Tests matrix renamed?); failing loud" >&2
+            exit 1
+          fi
+          if [ "$not_green" -ne 0 ]; then
             echo "Required Python 3.10–3.13 checks are not all success; skip merge-ready"
+            exit 0
+          fi
+          head_now=$(gh pr view "$pr" --repo "$REPO" --json headRefOid --jq .headRefOid)
+          if [ "$head_now" != "$SHA" ]; then
+            echo "PR #$pr head moved to ${head_now} before labeling; aborting"
             exit 0
           fi
           gh label create merge-ready --repo "$REPO" --force --color 0E8A16 --description "CI green; human may merge" || true
