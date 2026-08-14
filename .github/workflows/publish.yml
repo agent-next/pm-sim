@@ -69,8 +69,8 @@ jobs:
 
       - name: Publish to ClawHub
         run: |
-          npx clawhub@0.7.0 auth login --token "$CLAWHUB_TOKEN" --no-browser
-          npx clawhub@0.7.0 publish skill/polymarket-paper-trader \
+          npx clawhub@0.23.3 login --token "$CLAWHUB_TOKEN" --no-browser
+          npx clawhub@0.23.3 publish skill/polymarket-paper-trader \
             --version "${{ steps.version.outputs.VERSION }}" \
             --changelog "Release ${{ github.ref_name }}"
         env:
