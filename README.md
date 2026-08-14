@@ -109,7 +109,7 @@ Global flags: `--data-dir PATH`, `--account NAME` (or env vars `PM_TRADER_DATA_D
 
 ## MCP server — what your agent can do
 
-Your agent gets 30 tools via the [Model Context Protocol](https://modelcontextprotocol.io):
+Your agent gets the following tools via the [Model Context Protocol](https://modelcontextprotocol.io):
 
 ```bash
 pm-trader-mcp  # starts on stdio
