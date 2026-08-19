@@ -7,6 +7,8 @@ import math
 import pytest
 
 from pm_trader.analytics import (
+    _daily_pnl,
+    _parse_trade_datetime,
     compute_stats,
     max_drawdown,
     sharpe_ratio,
@@ -72,13 +74,15 @@ class TestWinRate:
 
     def test_sell_without_prior_buy(self):
         """Sell with no matching buy falls back to sell's own avg_price (always tie → 0%)."""
-        trades = [_trade(id=1, side="sell", avg_price=0.50)]
+        trades = [_trade(id=1, side="sell", avg_price=0.50, amount_usd=50.0, shares=100.0)]
         assert win_rate(trades) == 0.0
 
     def test_all_wins(self):
         trades = [
-            _trade(id=1, side="buy", avg_price=0.50, created_at="2026-01-01 10:00:00"),
-            _trade(id=2, side="sell", avg_price=0.70, created_at="2026-01-02 10:00:00"),
+            _trade(id=1, side="buy", avg_price=0.50, amount_usd=50.0, shares=100.0,
+                   created_at="2026-01-01 10:00:00"),
+            _trade(id=2, side="sell", avg_price=0.70, amount_usd=70.0, shares=100.0,
+                   created_at="2026-01-02 10:00:00"),
         ]
         assert win_rate(trades) == 1.0
 
@@ -91,10 +95,10 @@ class TestWinRate:
 
     def test_mixed(self):
         trades = [
-            _trade(id=1, side="buy", avg_price=0.50, market_condition_id="0x1"),
-            _trade(id=2, side="sell", avg_price=0.70, market_condition_id="0x1"),  # win
-            _trade(id=3, side="buy", avg_price=0.60, market_condition_id="0x2"),
-            _trade(id=4, side="sell", avg_price=0.40, market_condition_id="0x2"),  # loss
+            _trade(id=1, side="buy", avg_price=0.50, amount_usd=50.0, shares=100.0, market_condition_id="0x1"),
+            _trade(id=2, side="sell", avg_price=0.70, amount_usd=70.0, shares=100.0, market_condition_id="0x1"),  # win
+            _trade(id=3, side="buy", avg_price=0.60, amount_usd=60.0, shares=100.0, market_condition_id="0x2"),
+            _trade(id=4, side="sell", avg_price=0.40, amount_usd=40.0, shares=100.0, market_condition_id="0x2"),  # loss
         ]
         assert win_rate(trades) == 0.5
 
@@ -117,6 +121,54 @@ class TestWinRate:
             _trade(id=1, side="buy", avg_price=0.60, amount_usd=60.0, shares=100.0),
             _trade(id=2, side="buy", avg_price=0.70, amount_usd=70.0, shares=100.0),
             _trade(id=3, side="sell", avg_price=0.60, amount_usd=60.0, shares=100.0),
+        ]
+        assert win_rate(trades) == 0.0
+
+    def test_buy_fees_increase_entry_basis(self):
+        """Entry basis includes buy fees for win/loss classification."""
+        # Buy 100 shares for $50 with $5 fee -> fee-inclusive basis is 0.55/share.
+        # Sell at 0.52 should be LOSS when fees are included.
+        trades = [
+            _trade(id=1, side="buy", amount_usd=50.0, shares=100.0, avg_price=0.50, fee=5.0),
+            _trade(id=2, side="sell", amount_usd=52.0, shares=100.0, avg_price=0.52, fee=0.0),
+        ]
+        assert win_rate(trades) == 0.0
+
+    def test_fifo_lot_basis_for_partial_sell(self):
+        """Sell win/loss classification uses FIFO realized lot cost."""
+        trades = [
+            _trade(
+                id=1,
+                side="buy",
+                avg_price=0.20,
+                amount_usd=20.0,
+                shares=100.0,
+                created_at="2026-01-01 10:00:00",
+            ),
+            _trade(
+                id=2,
+                side="buy",
+                avg_price=0.80,
+                amount_usd=80.0,
+                shares=100.0,
+                created_at="2026-01-02 10:00:00",
+            ),
+            _trade(
+                id=3,
+                side="sell",
+                avg_price=0.50,
+                amount_usd=50.0,
+                shares=100.0,
+                created_at="2026-01-03 10:00:00",
+            ),
+        ]
+        assert win_rate(trades) == 1.0
+
+    def test_ignores_zero_share_buy_and_unknown_side(self):
+        trades = [
+            _trade(id=1, side="buy", shares=0.0, amount_usd=0.0),
+            _trade(id=2, side="hold", amount_usd=0.0),  # unknown side should be ignored
+            _trade(id=3, side="sell", avg_price=0.5, amount_usd=50.0, shares=100.0),
         ]
         assert win_rate(trades) == 0.0
 
@@ -178,6 +230,17 @@ class TestSharpeRatio:
             _trade(id=2, side="buy", amount_usd=100, fee=0, created_at="2026-01-02 10:00:00"),
         ]
         assert sharpe_ratio(consistent, 10_000) > sharpe_ratio(volatile, 10_000)
+
+    def test_zero_trade_days_are_included_in_returns_series(self):
+        contiguous = [
+            _trade(id=1, side="sell", amount_usd=100, fee=0, created_at="2026-01-01 10:00:00"),
+            _trade(id=2, side="sell", amount_usd=100, fee=0, created_at="2026-01-02 10:00:00"),
+        ]
+        with_gap = [
+            _trade(id=1, side="sell", amount_usd=100, fee=0, created_at="2026-01-01 10:00:00"),
+            _trade(id=2, side="sell", amount_usd=100, fee=0, created_at="2026-01-03 10:00:00"),
+        ]
+        assert sharpe_ratio(with_gap, 10_000) < sharpe_ratio(contiguous, 10_000)
 
 
 # ---------------------------------------------------------------------------
@@ -261,3 +324,19 @@ class TestComputeStats:
         stats = compute_stats([], _account(cash=8_000), positions_value=3_000)
         assert stats["total_value"] == pytest.approx(11_000)
         assert stats["pnl"] == pytest.approx(1_000)
+
+
+class TestAnalyticsInternals:
+    def test_daily_pnl_returns_empty_when_no_cashflow_sides(self):
+        trades = [_trade(id=1, side="hold", amount_usd=10.0, created_at="2026-01-01 10:00:00")]
+        assert _daily_pnl(trades) == []
+
+    def test_parse_trade_datetime_handles_blank(self):
+        assert _parse_trade_datetime("").year == 1
+
+    def test_parse_trade_datetime_handles_z_suffix(self):
+        dt = _parse_trade_datetime("2026-01-01T00:00:00Z")
+        assert dt.year == 2026
+
+    def test_parse_trade_datetime_invalid_with_space_fallback(self):
+        assert _parse_trade_datetime("bad date").year == 1

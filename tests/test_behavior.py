@@ -710,19 +710,12 @@ class TestCheckOrdersEdgeCases:
         assert len(rejected) == 1
 
     def test_limit_buy_insufficient_balance(self, acct):
-        """Limit buy that fills but exceeds cash should be rejected."""
+        """Limit buy exceeding available cash is rejected at placement."""
         # Start with very low balance
         acct.init_account(1.0)
         _mock(acct, book=_book(asks=[(0.50, 10000)], bids=[(0.49, 5000)]))
-        acct.place_limit_order("test-market", "yes", "buy", 1000.0, 0.55)
-
-        # Price drops — order triggers, but account can't afford it
-        cheap_book = _book(asks=[(0.50, 10000)], bids=[(0.49, 5000)])
-        acct.api.get_order_book = MagicMock(return_value=cheap_book)
-        results = acct.check_orders()
-        # Should be rejected due to insufficient balance
-        rejected = [r for r in results if r["action"] == "rejected"]
-        assert len(rejected) == 1
+        with pytest.raises(InsufficientBalanceError):
+            acct.place_limit_order("test-market", "yes", "buy", 1000.0, 0.55)
 
 
 # ---------------------------------------------------------------------------

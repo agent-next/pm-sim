@@ -72,7 +72,8 @@ mcp_server.py → engine.py (trading tools, 30 MCP tools)
 - `MAX_RESULTS = 100` caps all market-listing tool limits to prevent resource exhaustion
 
 ### Key design decisions
-- **Fee formula**: `(bps/10000) * min(price, 1-price) * shares` — matches Polymarket exactly
+- **Fee formula**: `(bps/10000) * min(price, 1-price) * size` — summed per filled level
+- **Slippage**: primary metric is vs best quote, with midpoint slippage also reported for context
 - **FOK** (fill-or-kill): all or nothing. **FAK** (fill-and-kill): partial fills ok
 - **Limit orders**: GTC (rest until filled/cancelled) or GTD (expire at timestamp)
 - **No price/book caching**: always live from API. Market metadata cached 5 min.

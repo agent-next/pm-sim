@@ -234,11 +234,14 @@ class PolymarketClient:
         cache_key = f"fee_rate:{token_id}"
         cached = self._get_cached(cache_key)
         if cached is not None:
-            return int(cached.get("fee_rate_bps", 0))
+            # New CLOB payloads use `base_fee`; keep fallback for older caches.
+            return int(cached.get("base_fee", cached.get("fee_rate_bps", 0)))
 
         data = self._clob_get("/fee-rate", params={"token_id": token_id})
-        fee_bps = int(data.get("fee_rate_bps", 0))
-        self._set_cached(cache_key, {"fee_rate_bps": fee_bps})
+        # Official CLOB response key is `base_fee`; fallback keeps backward
+        # compatibility with historical fixtures.
+        fee_bps = int(data.get("base_fee", data.get("fee_rate_bps", 0)))
+        self._set_cached(cache_key, {"base_fee": fee_bps})
         return fee_bps
 
     def get_tick_size(self, token_id: str) -> float:
@@ -311,6 +314,8 @@ def _parse_clob_market(data: dict) -> Market:
         tokens=tokens,
         active=_to_bool(data.get("active", True)),
         closed=_to_bool(data.get("closed", False)),
+        accepting_orders=_to_bool(data.get("accepting_orders", True)),
+        neg_risk=_to_bool(data.get("neg_risk", False)),
         end_date=data.get("end_date_iso", ""),
         tick_size=float(data.get("minimum_tick_size", 0.01) or 0.01),
     )
@@ -362,6 +367,13 @@ def _parse_market(data: dict) -> Market:
     # condition_id: Gamma uses conditionId (camelCase)
     condition_id = data.get("conditionId", data.get("condition_id", ""))
 
+    def _to_bool(val, default: bool) -> bool:
+        if val is None:
+            return default
+        if isinstance(val, str):
+            return val.lower() == "true"
+        return bool(val)
+
     # tick size: Gamma uses orderPriceMinTickSize
     tick_size_raw = data.get("orderPriceMinTickSize",
                              data.get("minimum_tick_size", 0.01))
@@ -375,12 +387,17 @@ def _parse_market(data: dict) -> Market:
         outcomes=outcomes,
         outcome_prices=outcome_prices,
         tokens=tokens,
-        active=bool(data.get("active", False)),
-        closed=bool(data.get("closed", False)),
+        active=_to_bool(data.get("active"), False),
+        closed=_to_bool(data.get("closed"), False),
+        accepting_orders=_to_bool(
+            data.get("acceptingOrders", data.get("accepting_orders")),
+            True,
+        ),
+        neg_risk=_to_bool(data.get("negRisk", data.get("neg_risk")), False),
         volume=float(data.get("volume", 0) or 0),
         liquidity=float(data.get("liquidity", 0) or 0),
         end_date=data.get("endDateIso", data.get("end_date_iso", data.get("end_date", ""))),
-        fee_rate_bps=int(data.get("fee_rate_bps", 0) or 0),
+        fee_rate_bps=int(data.get("base_fee", data.get("fee_rate_bps", 0)) or 0),
         tick_size=tick_size,
     )
 

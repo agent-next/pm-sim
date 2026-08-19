@@ -22,6 +22,7 @@ from pm_trader.models import (
     OrderRejectedError,
     Position,
     ResolveResult,
+    TickSizeViolationError,
     Trade,
     TradeResult,
 )
@@ -31,14 +32,18 @@ from pm_trader.orders import (
     create_order,
     expire_orders,
     get_pending_orders,
+    get_reserved_buy_notional,
     init_orders_schema,
     mark_filled,
+    mark_partially_filled,
     reject_order,
     should_fill,
 )
-from pm_trader.orderbook import simulate_buy_fill, simulate_sell_fill
+from pm_trader.orderbook import calculate_fee, simulate_buy_fill, simulate_sell_fill
 
 MIN_ORDER_USD = 1.0  # Polymarket minimum order size
+TICK_EPSILON = 1e-9
+FILL_EPSILON = 1e-9
 
 # Errors that indicate an order is permanently unfillable (not transient)
 _PERMANENT_ORDER_ERRORS = (
@@ -103,6 +108,43 @@ class Engine:
                 raise InvalidOutcomeError(outcome, valid)
         return outcome
 
+    @staticmethod
+    def _validate_tick_size(price: float, tick_size: float) -> None:
+        """Ensure a user-supplied limit price conforms to market tick size."""
+        if tick_size <= 0:
+            return
+        ticks = round(price / tick_size)
+        snapped = ticks * tick_size
+        if abs(price - snapped) > TICK_EPSILON:
+            raise TickSizeViolationError(price, tick_size)
+
+    def _reserved_buy_notional(self) -> float:
+        """USD currently reserved by open buy limit orders."""
+        return get_reserved_buy_notional(self.db.conn)
+
+    def _available_cash(self) -> float:
+        """Cash available for new buy orders after existing reservations."""
+        account = self._require_account()
+        return max(0.0, account.cash - self._reserved_buy_notional())
+
+    @staticmethod
+    def _estimate_buy_fee_upper_bound(amount_usd: float, fee_rate_bps: int) -> float:
+        """Conservative fee estimate for reserving buy limit-order cash."""
+        if amount_usd <= 0 or fee_rate_bps <= 0:
+            return 0.0
+        # Worst case of min(price, 1-price) occurs at price=0.5.
+        return calculate_fee(fee_rate_bps, 0.5, amount_usd)
+
+    @staticmethod
+    def _require_market_tradable(market) -> None:
+        """Reject trades on closed, inactive, or non-accepting markets."""
+        if market.closed:
+            raise MarketClosedError(market.slug)
+        if not market.active:
+            raise OrderRejectedError(f"Market '{market.slug}' is not active")
+        if not market.accepting_orders:
+            raise OrderRejectedError(f"Market '{market.slug}' is not accepting orders")
+
     # ------------------------------------------------------------------
     # BUY — spend USD, receive shares
     # ------------------------------------------------------------------
@@ -128,14 +170,12 @@ class Engine:
         # Fetch market and validate outcome against actual market outcomes
         market = self.api.get_market(slug_or_id)
         outcome = self._validate_outcome(outcome, market)
+        self._require_market_tradable(market)
 
         # Fetch live order book and fee rate
         token_id = market.get_token_id(outcome)
         book = self.api.get_order_book(token_id)
         fee_rate_bps = self.api.get_fee_rate(token_id)
-
-        if market.closed:
-            raise MarketClosedError(market.slug)
 
         # Simulate fill against the real order book
         fill = simulate_buy_fill(book, amount_usd, fee_rate_bps, order_type)
@@ -245,14 +285,17 @@ class Engine:
             raise OrderRejectedError(
                 f"Cannot sell {shares:.4f} shares, only hold {position.shares:.4f}"
             )
-
-        if market.closed:
-            raise MarketClosedError(market.slug)
+        self._require_market_tradable(market)
 
         # Fetch live book and fee rate
         token_id = market.get_token_id(outcome)
         book = self.api.get_order_book(token_id)
         fee_rate_bps = self.api.get_fee_rate(token_id)
+        best_bid = max((level.price for level in book.bids), default=0.0)
+        if best_bid > 0 and shares * best_bid < MIN_ORDER_USD:
+            raise OrderRejectedError(
+                f"Minimum order size is ${MIN_ORDER_USD:.2f}"
+            )
 
         # Simulate fill against the real order book
         fill = simulate_sell_fill(book, shares, fee_rate_bps, order_type)
@@ -376,8 +419,12 @@ class Engine:
         account = self._require_account()
         portfolio = self.get_portfolio()
         positions_value = sum(p["current_value"] for p in portfolio)
+        reserved_cash = self._reserved_buy_notional()
+        available_cash = max(0.0, account.cash - reserved_cash)
         return {
             "cash": account.cash,
+            "available_cash": available_cash,
+            "reserved_cash": reserved_cash,
             "starting_balance": account.starting_balance,
             "positions_value": positions_value,
             "total_value": account.cash + positions_value,
@@ -408,7 +455,7 @@ class Engine:
         expires_at: str | None = None,
     ) -> dict:
         """Place a GTC or GTD limit order."""
-        self._require_account()
+        account = self._require_account()
         if side not in ("buy", "sell"):
             raise OrderRejectedError(f"Invalid side: {side!r}")
         if not (0 < limit_price < 1):
@@ -422,6 +469,26 @@ class Engine:
 
         market = self.api.get_market(slug_or_id)
         outcome = self._validate_outcome(outcome, market)
+        self._require_market_tradable(market)
+        token_id = market.get_token_id(outcome)
+        tick_size = market.tick_size
+        if tick_size <= 0:
+            tick_size = self.api.get_tick_size(token_id)
+        self._validate_tick_size(limit_price, tick_size)
+        if side == "buy":
+            try:
+                fee_rate_bps = int(float(market.fee_rate_bps))
+            except (TypeError, ValueError):
+                fee_rate_bps = 0
+            if fee_rate_bps <= 0:
+                try:
+                    fee_rate_bps = int(float(self.api.get_fee_rate(token_id)))
+                except Exception:
+                    fee_rate_bps = 0
+            required = amount + self._estimate_buy_fee_upper_bound(amount, fee_rate_bps)
+            available = max(0.0, account.cash - self._reserved_buy_notional())
+            if required > available + FILL_EPSILON:
+                raise InsufficientBalanceError(required=required, available=available)
         order = create_order(
             self.db.conn,
             market_slug=market.slug,
@@ -475,6 +542,7 @@ class Engine:
         for order in pending:
             try:
                 market = self.api.get_market(order.market_slug)
+                self._require_market_tradable(market)
                 token_id = market.get_token_id(order.outcome)
                 book = self.api.get_order_book(token_id)
                 fee_rate_bps = self.api.get_fee_rate(token_id)
@@ -485,7 +553,7 @@ class Engine:
                     if best_ask is None or best_ask > order.limit_price:
                         continue
                     fill = simulate_buy_fill(
-                        book, order.amount, fee_rate_bps, "fak",
+                        book, order.remaining_amount, fee_rate_bps, "fak",
                         max_price=order.limit_price,
                     )
                 else:
@@ -494,7 +562,7 @@ class Engine:
                     if best_bid is None or best_bid < order.limit_price:
                         continue
                     fill = simulate_sell_fill(
-                        book, order.amount, fee_rate_bps, "fak",
+                        book, order.remaining_amount, fee_rate_bps, "fak",
                         min_price=order.limit_price,
                     )
 
@@ -507,11 +575,23 @@ class Engine:
                 else:
                     self._execute_limit_sell(market, order, fill, fee_rate_bps)
 
-                updated = mark_filled(self.db.conn, order.id)
-                results.append({
-                    "order": _order_to_dict(updated),
-                    "action": "filled",
-                })
+                remaining = (
+                    order.remaining_amount - fill.total_cost
+                    if order.side == "buy"
+                    else order.remaining_amount - fill.total_shares
+                )
+                if remaining <= FILL_EPSILON:
+                    updated = mark_filled(self.db.conn, order.id)
+                    results.append({
+                        "order": _order_to_dict(updated),
+                        "action": "filled",
+                    })
+                else:
+                    updated = mark_partially_filled(self.db.conn, order.id, remaining)
+                    results.append({
+                        "order": _order_to_dict(updated),
+                        "action": "partially_filled",
+                    })
             except _PERMANENT_ORDER_ERRORS as e:
                 # Permanent failure — mark rejected so it's not retried
                 updated = reject_order(self.db.conn, order.id)
@@ -725,6 +805,7 @@ def _order_to_dict(order) -> dict:
         "outcome": order.outcome,
         "side": order.side,
         "amount": order.amount,
+        "remaining_amount": order.remaining_amount,
         "limit_price": order.limit_price,
         "order_type": order.order_type,
         "expires_at": order.expires_at,

@@ -527,7 +527,17 @@ class TestFeeSimulation:
 
         try:
             pos = engine.db.get_position(m.condition_id, "yes")
-            sell_qty = min(pos.shares / 4, 5.0)
+            book = engine.api.get_order_book(m.yes_token_id)
+            best_bid = max((lvl.price for lvl in book.bids), default=0.0)
+            if best_bid <= 0:
+                pytest.skip("No valid best bid for sell")
+
+            min_sell_qty = 1.0 / best_bid
+            if pos.shares < min_sell_qty:
+                pytest.skip("Position too small to satisfy minimum sell notional")
+
+            target_qty = min(pos.shares / 4, 5.0)
+            sell_qty = max(target_qty, min_sell_qty)
             cash_before = engine.get_account().cash
 
             result = engine.sell(m.slug, "yes", sell_qty)

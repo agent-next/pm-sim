@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 from pm_trader.models import Account, Trade
+
+_EPSILON = 1e-9
 
 
 def compute_stats(
@@ -32,8 +34,7 @@ def compute_stats(
     pnl = total_value - account.starting_balance
     roi_pct = (pnl / account.starting_balance * 100) if account.starting_balance else 0.0
 
-    # Reverse to chronological order for time-series calculations
-    chronological = list(reversed(trades))
+    chronological = _sort_trades_chronological(trades)
 
     return {
         "starting_balance": account.starting_balance,
@@ -56,34 +57,51 @@ def compute_stats(
 def win_rate(trades: list[Trade]) -> float:
     """Fraction of sell trades with positive realized P&L.
 
-    A sell is "winning" if the sell avg_price exceeds the weighted-average
-    entry price from all buys in that (market, outcome).
-
-    Tracks cumulative cost and shares per position key to compute
-    cost-averaged entry, rather than using only the last buy price.
+    Uses FIFO lots per (market_condition_id, outcome) for entry cost accounting.
+    A sell is "winning" if net proceeds exceed realized FIFO entry cost.
     """
-    sells = [t for t in trades if t.side == "sell"]
+    chronological = _sort_trades_chronological(trades)
+    sells = [t for t in chronological if t.side == "sell"]
     if not sells:
         return 0.0
 
-    # Build weighted-average entry price per (market, outcome)
-    buy_cost: dict[tuple[str, str], float] = defaultdict(float)
-    buy_shares: dict[tuple[str, str], float] = defaultdict(float)
-    for t in trades:
-        if t.side == "buy":
-            key = (t.market_condition_id, t.outcome)
-            buy_cost[key] += t.amount_usd
-            buy_shares[key] += t.shares
-
+    # FIFO lots: [(remaining_shares, cost_per_share), ...]
+    lots: dict[tuple[str, str], list[list[float]]] = defaultdict(list)
     wins = 0
-    for t in sells:
-        key = (t.market_condition_id, t.outcome)
-        total_shares = buy_shares.get(key, 0.0)
-        if total_shares > 0:
-            entry_price = buy_cost[key] / total_shares
-        else:
-            entry_price = t.avg_price
-        if t.avg_price > entry_price:
+
+    for t in chronological:
+        key = (t.market_condition_id, t.outcome.lower().strip())
+        if t.side == "buy":
+            if t.shares <= _EPSILON:
+                continue
+            cost_per_share = (t.amount_usd + t.fee) / t.shares
+            lots[key].append([t.shares, cost_per_share])
+            continue
+        if t.side != "sell":
+            continue
+
+        remaining = max(0.0, t.shares)
+        entry_cost = 0.0
+
+        while remaining > _EPSILON and lots[key]:
+            lot = lots[key][0]
+            lot_shares, lot_cost_per_share = lot
+            take = min(lot_shares, remaining)
+            entry_cost += take * lot_cost_per_share
+            lot_shares -= take
+            remaining -= take
+
+            if lot_shares <= _EPSILON:
+                lots[key].pop(0)
+            else:
+                lot[0] = lot_shares
+
+        if remaining > _EPSILON:
+            # Unknown lot basis fallback: neutral to avoid false wins.
+            entry_cost += remaining * t.avg_price
+
+        proceeds = t.amount_usd - t.fee
+        if proceeds > entry_cost + _EPSILON:
             wins += 1
 
     return wins / len(sells)
@@ -94,25 +112,10 @@ def sharpe_ratio(
     starting_balance: float,
     annualize_days: int = 365,
 ) -> float:
-    """Annualized Sharpe ratio from daily P&L.
-
-    Groups trades by date, computes daily returns as
-    daily_pnl / portfolio_value_at_start_of_day.
-    Assumes risk-free rate = 0 (standard for prediction markets).
-    """
-    daily_pnl = _daily_pnl(trades_chronological)
-    if len(daily_pnl) < 2:
+    """Annualized Sharpe ratio from daily equity returns (risk-free=0)."""
+    daily_returns = _daily_returns(trades_chronological, starting_balance)
+    if len(daily_returns) < 2:
         return 0.0
-
-    # Convert daily P&L to daily returns
-    cumulative = starting_balance
-    daily_returns = []
-    for pnl in daily_pnl:
-        if cumulative > 0:
-            daily_returns.append(pnl / cumulative)
-        else:
-            daily_returns.append(0.0)
-        cumulative += pnl
 
     mean_ret = sum(daily_returns) / len(daily_returns)
     variance = sum((r - mean_ret) ** 2 for r in daily_returns) / (len(daily_returns) - 1)
@@ -128,29 +131,20 @@ def max_drawdown(
     trades_chronological: list[Trade],
     starting_balance: float,
 ) -> float:
-    """Maximum drawdown as a fraction (0.0 to 1.0).
-
-    Tracks cumulative P&L, finds the largest peak-to-trough decline
-    relative to the peak.
-    """
+    """Maximum drawdown from the daily equity curve (0.0 to 1.0)."""
     if not trades_chronological:
         return 0.0
 
-    cumulative = starting_balance
-    peak = cumulative
+    equity_curve = _daily_equity_curve(trades_chronological, starting_balance)
+    peak = equity_curve[0]
     max_dd = 0.0
 
-    for t in trades_chronological:
-        if t.side == "buy":
-            cumulative -= (t.amount_usd + t.fee)
-        elif t.side == "sell":
-            cumulative += (t.amount_usd - t.fee)
-
-        if cumulative > peak:
-            peak = cumulative
+    for equity in equity_curve:
+        if equity > peak:
+            peak = equity
 
         if peak > 0:
-            dd = (peak - cumulative) / peak
+            dd = (peak - equity) / peak
             max_dd = max(max_dd, dd)
 
     return max_dd
@@ -162,21 +156,8 @@ def max_drawdown(
 
 
 def _daily_pnl(trades_chronological: list[Trade]) -> list[float]:
-    """Group trades by date and compute net P&L per day."""
-    if not trades_chronological:
-        return []
-
-    by_date: dict[str, float] = defaultdict(float)
-    for t in trades_chronological:
-        # Parse date from created_at (format: "YYYY-MM-DD HH:MM:SS" or ISO)
-        date_str = t.created_at[:10]
-        if t.side == "buy":
-            by_date[date_str] -= (t.amount_usd + t.fee)
-        elif t.side == "sell":
-            by_date[date_str] += (t.amount_usd - t.fee)
-
-    # Return in date order
-    return [by_date[d] for d in sorted(by_date.keys())]
+    """Daily net cashflow series from first trade date to last, zero-filled."""
+    return _daily_cashflows(trades_chronological)
 
 
 def _avg_trade_size(trades: list[Trade]) -> float:
@@ -184,3 +165,82 @@ def _avg_trade_size(trades: list[Trade]) -> float:
     if not trades:
         return 0.0
     return sum(t.amount_usd for t in trades) / len(trades)
+
+
+def _sort_trades_chronological(trades: list[Trade]) -> list[Trade]:
+    """Sort trades oldest-first by timestamp, then id."""
+    return sorted(trades, key=lambda t: (_parse_trade_datetime(t.created_at), t.id))
+
+
+def _parse_trade_datetime(created_at: str) -> datetime:
+    text = created_at.strip()
+    if not text:
+        return datetime.min
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        pass
+    if " " in text and "T" not in text:
+        try:
+            return datetime.fromisoformat(text.replace(" ", "T", 1))
+        except ValueError:
+            pass
+    try:
+        return datetime.strptime(text[:19], "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return datetime.min
+
+
+def _daily_cashflows(trades_chronological: list[Trade]) -> list[float]:
+    if not trades_chronological:
+        return []
+
+    by_day: dict[date, float] = defaultdict(float)
+    for t in trades_chronological:
+        day = _parse_trade_datetime(t.created_at).date()
+        if t.side == "buy":
+            by_day[day] -= (t.amount_usd + t.fee)
+        elif t.side == "sell":
+            by_day[day] += (t.amount_usd - t.fee)
+
+    if not by_day:
+        return []
+
+    days: list[float] = []
+    current = min(by_day.keys())
+    end = max(by_day.keys())
+    while current <= end:
+        days.append(by_day.get(current, 0.0))
+        current += timedelta(days=1)
+    return days
+
+
+def _daily_equity_curve(
+    trades_chronological: list[Trade],
+    starting_balance: float,
+) -> list[float]:
+    daily_cashflows = _daily_cashflows(trades_chronological)
+    equity = [starting_balance]
+    for pnl in daily_cashflows:
+        equity.append(equity[-1] + pnl)
+    return equity
+
+
+def _daily_returns(
+    trades_chronological: list[Trade],
+    starting_balance: float,
+) -> list[float]:
+    equity_curve = _daily_equity_curve(trades_chronological, starting_balance)
+    if len(equity_curve) < 2:
+        return []
+    returns: list[float] = []
+    for i in range(1, len(equity_curve)):
+        previous = equity_curve[i - 1]
+        current = equity_curve[i]
+        if previous > 0:
+            returns.append((current - previous) / previous)
+        else:
+            returns.append(0.0)
+    return returns

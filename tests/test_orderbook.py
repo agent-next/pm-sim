@@ -9,8 +9,15 @@ from __future__ import annotations
 
 import pytest
 
-from pm_trader.models import OrderBook, OrderBookLevel
-from pm_trader.orderbook import calculate_fee, simulate_buy_fill, simulate_sell_fill
+from pm_trader.models import Fill, OrderBook, OrderBookLevel
+from pm_trader.orderbook import (
+    _best_ask,
+    _best_bid,
+    _sum_level_fees,
+    calculate_fee,
+    simulate_buy_fill,
+    simulate_sell_fill,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -198,27 +205,30 @@ class TestBuyEmptyBook:
 
 
 class TestBuySlippageCalculation:
-    """Verify slippage_bps is correct relative to midpoint."""
+    """Verify slippage metrics vs best quote and midpoint."""
 
     def test_single_level_slippage(self, multi_level_book: OrderBook) -> None:
-        # Midpoint = (0.64 + 0.66) / 2 = 0.65
-        # Single-level fill at 0.66 -> slippage = (0.66 - 0.65) / 0.65 * 10000
-        # = 0.01 / 0.65 * 10000 = 153.846...
+        # Single-level fill at best ask (0.66) => zero slippage vs best quote.
+        # Midpoint remains positive slippage.
         result = simulate_buy_fill(multi_level_book, 50.0, fee_rate_bps=0)
 
+        best_ask = 0.66
         midpoint = 0.65
-        expected_slippage = (0.66 - midpoint) / midpoint * 10_000
-        assert result.slippage_bps == pytest.approx(expected_slippage)
+        expected_best_quote = (0.66 - best_ask) / best_ask * 10_000
+        expected_midpoint = (0.66 - midpoint) / midpoint * 10_000
+        assert result.slippage_bps == pytest.approx(expected_best_quote)
+        assert result.slippage_bps_midpoint == pytest.approx(expected_midpoint)
 
     def test_multi_level_slippage(self, multi_level_book: OrderBook) -> None:
-        # $100 buy: avg_price = 100 / (80 + 47.20/0.67) = 0.66468...
-        # Midpoint = 0.65
-        # slippage = (avg_price - 0.65) / 0.65 * 10000
+        # $100 buy crosses levels; avg above best ask and above midpoint.
         result = simulate_buy_fill(multi_level_book, 100.0, fee_rate_bps=0)
 
+        best_ask = 0.66
         midpoint = 0.65
-        expected_slippage = (result.avg_price - midpoint) / midpoint * 10_000
-        assert result.slippage_bps == pytest.approx(expected_slippage)
+        expected_best_quote = (result.avg_price - best_ask) / best_ask * 10_000
+        expected_midpoint = (result.avg_price - midpoint) / midpoint * 10_000
+        assert result.slippage_bps == pytest.approx(expected_best_quote)
+        assert result.slippage_bps_midpoint == pytest.approx(expected_midpoint)
         assert result.slippage_bps > 0  # buying pushes price up
 
 
@@ -286,12 +296,15 @@ class TestSellMultiLevelFill:
         assert result.fills[1].cost == pytest.approx(31.50)
 
     def test_sell_slippage_is_negative(self, multi_level_book: OrderBook) -> None:
-        # Selling below midpoint (0.65) means negative slippage
+        # Selling below best bid and midpoint both produce negative slippage.
         result = simulate_sell_fill(multi_level_book, 200.0, fee_rate_bps=0)
 
+        best_bid = 0.64
         midpoint = 0.65
-        expected_slippage = (0.6375 - midpoint) / midpoint * 10_000
-        assert result.slippage_bps == pytest.approx(expected_slippage)
+        expected_best_quote = (0.6375 - best_bid) / best_bid * 10_000
+        expected_midpoint = (0.6375 - midpoint) / midpoint * 10_000
+        assert result.slippage_bps == pytest.approx(expected_best_quote)
+        assert result.slippage_bps_midpoint == pytest.approx(expected_midpoint)
         assert result.slippage_bps < 0  # selling pushes price down
 
 
@@ -385,29 +398,31 @@ class TestFee200BpsBuy:
         # $100 buy with 200 bps fee
         result = simulate_buy_fill(multi_level_book, 100.0, fee_rate_bps=200)
 
-        # avg_price ~0.66468, so min(0.66468, 0.33532) = 0.33532
-        # fee = 0.02 * 0.33532 * 100 = 0.67064
-        expected_fee = (200 / 10_000) * min(result.avg_price, 1 - result.avg_price) * 100.0
+        expected_fee = sum(
+            calculate_fee(200, fill.price, fill.cost, enforce_minimum=False)
+            for fill in result.fills
+        )
         assert result.fee == pytest.approx(expected_fee)
         assert result.fee > 0
 
 
 class TestFee175BpsSell:
-    """175 bps on a 100-share sell at price 0.64."""
+    """175 bps on a sell with $64 gross proceeds."""
 
     def test_exact_calculation(self) -> None:
-        # fee = (175/10000) * min(0.64, 0.36) * 100 = 0.0175 * 0.36 * 100 = 0.63
-        fee = calculate_fee(175, 0.64, 100.0)
-        assert fee == pytest.approx(0.63)
+        # Sell 100 shares at $0.64 => gross proceeds = $64
+        # fee = (175/10000) * min(0.64, 0.36) * 64 = 0.4032
+        fee = calculate_fee(175, 0.64, 64.0)
+        assert fee == pytest.approx(0.4032)
 
     def test_sell_with_fee(self, multi_level_book: OrderBook) -> None:
         # Sell 100 shares with 175 bps fee
         result = simulate_sell_fill(multi_level_book, 100.0, fee_rate_bps=175)
 
-        # 100 shares fills entirely at bid level 1 (price=0.64, size=150)
-        # avg_price = 0.64, fee = 0.0175 * min(0.64, 0.36) * 100 = 0.63
+        # 100 shares fills entirely at bid level 1 (price=0.64, size=150):
+        # gross proceeds = $64, fee = 0.0175 * min(0.64, 0.36) * 64 = 0.4032
         assert result.avg_price == pytest.approx(0.64)
-        assert result.fee == pytest.approx(0.63)
+        assert result.fee == pytest.approx(0.4032)
 
 
 class TestFeeMinimum:
@@ -418,6 +433,38 @@ class TestFeeMinimum:
         # fee = (1/10000) * 0.50 * 0.001 = 0.00000005 -> clamped to 0.0001
         fee = calculate_fee(1, 0.50, 0.001)
         assert fee == pytest.approx(0.0001)
+
+
+class TestFokFloatingPointTolerance:
+    """FOK should not reject fills due to tiny floating-point remainders."""
+
+    def test_buy_exact_depth_with_float_noise(self) -> None:
+        book = OrderBook(
+            bids=[OrderBookLevel(price=0.40, size=1.0)],
+            asks=[
+                OrderBookLevel(price=0.10, size=1.0),
+                OrderBookLevel(price=0.20, size=1.0),
+            ],
+        )
+        result = simulate_buy_fill(book, 0.1 + 0.2, fee_rate_bps=0, order_type="fok")
+
+        assert result.filled is True
+        assert result.is_partial is False
+        assert result.total_cost == pytest.approx(0.3)
+
+    def test_sell_exact_depth_with_float_noise(self) -> None:
+        book = OrderBook(
+            bids=[
+                OrderBookLevel(price=0.60, size=0.1),
+                OrderBookLevel(price=0.59, size=0.2),
+            ],
+            asks=[OrderBookLevel(price=0.65, size=1.0)],
+        )
+        result = simulate_sell_fill(book, 0.1 + 0.2, fee_rate_bps=0, order_type="fok")
+
+        assert result.filled is True
+        assert result.is_partial is False
+        assert result.total_shares == pytest.approx(0.3)
 
 
 class TestFeeSymmetry:
@@ -666,5 +713,34 @@ class TestDesignDocExample:
         )
         result = simulate_buy_fill(book, 100.0, fee_rate_bps=200)
 
-        expected_fee = (200 / 10_000) * min(result.avg_price, 1.0 - result.avg_price) * 100.0
+        expected_fee = sum(
+            calculate_fee(200, fill.price, fill.cost, enforce_minimum=False)
+            for fill in result.fills
+        )
         assert result.fee == pytest.approx(expected_fee)
+
+
+class TestCoverageBranches:
+    def test_best_quote_helpers_return_none_on_empty_side(self) -> None:
+        assert _best_ask(OrderBook(bids=[OrderBookLevel(price=0.60, size=10.0)], asks=[])) is None
+        assert _best_bid(OrderBook(bids=[], asks=[OrderBookLevel(price=0.70, size=10.0)])) is None
+
+    def test_sum_level_fees_returns_zero_when_formula_is_zero(self) -> None:
+        fills = [Fill(price=0.0, shares=10.0, cost=5.0, level=1)]
+        assert _sum_level_fees(200, fills) == 0.0
+
+    def test_buy_slippage_falls_back_to_zero_when_best_ask_nonpositive(self) -> None:
+        book = OrderBook(
+            bids=[OrderBookLevel(price=0.40, size=100.0)],
+            asks=[OrderBookLevel(price=0.0, size=100.0)],
+        )
+        result = simulate_buy_fill(book, 10.0, fee_rate_bps=0, order_type="fak")
+        assert result.slippage_bps == pytest.approx(0.0)
+
+    def test_sell_slippage_falls_back_to_zero_when_best_bid_nonpositive(self) -> None:
+        book = OrderBook(
+            bids=[OrderBookLevel(price=0.0, size=100.0)],
+            asks=[OrderBookLevel(price=0.60, size=100.0)],
+        )
+        result = simulate_sell_fill(book, 10.0, fee_rate_bps=0, order_type="fak")
+        assert result.slippage_bps == pytest.approx(0.0)

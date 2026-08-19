@@ -57,6 +57,8 @@ SAMPLE_GAMMA_MARKET = {
     ]),
     "active": True,
     "closed": False,
+    "acceptingOrders": True,
+    "negRisk": False,
     "volume": "5000000",
     "liquidity": "250000",
     "end_date_iso": "2026-12-31T23:59:59Z",
@@ -89,6 +91,8 @@ class TestParseMarket:
         assert market.outcome_prices == [0.65, 0.35]
         assert market.active is True
         assert market.closed is False
+        assert market.accepting_orders is True
+        assert market.neg_risk is False
         assert market.volume == 5_000_000.0
         assert market.liquidity == 250_000.0
         assert market.fee_rate_bps == 0
@@ -121,12 +125,28 @@ class TestParseMarket:
         assert market.volume == 0.0
         assert market.outcome_prices == [0.0, 0.0]
         assert market.tick_size == 0.01
+        assert market.accepting_orders is True
+        assert market.neg_risk is False
 
     def test_null_volume_liquidity(self):
         data = {**SAMPLE_GAMMA_MARKET, "volume": None, "liquidity": None}
         market = _parse_market(data)
         assert market.volume == 0.0
         assert market.liquidity == 0.0
+
+    def test_string_bool_flags_are_parsed(self):
+        data = {
+            **SAMPLE_GAMMA_MARKET,
+            "active": "TRUE",
+            "closed": "false",
+            "acceptingOrders": "true",
+            "negRisk": "FALSE",
+        }
+        market = _parse_market(data)
+        assert market.active is True
+        assert market.closed is False
+        assert market.accepting_orders is True
+        assert market.neg_risk is False
 
 
 # ---------------------------------------------------------------------------
@@ -296,7 +316,7 @@ class TestClobEndpoints:
     def test_get_fee_rate(self, client: PolymarketClient, httpx_mock):
         httpx_mock.add_response(
             url=httpx.URL(CLOB_BASE + "/fee-rate", params={"token_id": "tok_yes"}),
-            json={"fee_rate_bps": 200},
+            json={"base_fee": 200},
         )
         fee = client.get_fee_rate("tok_yes")
         assert fee == 200
@@ -304,12 +324,20 @@ class TestClobEndpoints:
     def test_fee_rate_cached(self, client: PolymarketClient, httpx_mock):
         httpx_mock.add_response(
             url=httpx.URL(CLOB_BASE + "/fee-rate", params={"token_id": "tok_yes"}),
-            json={"fee_rate_bps": 175},
+            json={"base_fee": 175},
         )
         f1 = client.get_fee_rate("tok_yes")
         f2 = client.get_fee_rate("tok_yes")
         assert f1 == f2 == 175
         assert len(httpx_mock.get_requests()) == 1
+
+    def test_get_fee_rate_legacy_field_compat(self, client: PolymarketClient, httpx_mock):
+        httpx_mock.add_response(
+            url=httpx.URL(CLOB_BASE + "/fee-rate", params={"token_id": "tok_yes"}),
+            json={"fee_rate_bps": 150},
+        )
+        fee = client.get_fee_rate("tok_yes")
+        assert fee == 150
 
     def test_get_tick_size(self, client: PolymarketClient, httpx_mock):
         httpx_mock.add_response(
@@ -346,7 +374,7 @@ class TestGetTradeContext:
         )
         httpx_mock.add_response(
             url=httpx.URL(CLOB_BASE + "/fee-rate", params={"token_id": "tok_yes"}),
-            json={"fee_rate_bps": 0},
+            json={"base_fee": 0},
         )
         market, book, fee = client.get_trade_context("btc", "yes")
         assert market.condition_id == "0xabc123"
@@ -364,7 +392,7 @@ class TestGetTradeContext:
         )
         httpx_mock.add_response(
             url=httpx.URL(CLOB_BASE + "/fee-rate", params={"token_id": "tok_no"}),
-            json={"fee_rate_bps": 175},
+            json={"base_fee": 175},
         )
         market, book, fee = client.get_trade_context("btc", "no")
         assert fee == 175
