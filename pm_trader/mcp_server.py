@@ -13,6 +13,7 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 
 from pm_trader.engine import Engine
+from pm_trader.fxmacrodata import get_macro_events
 
 DEFAULT_DATA_DIR = Path.home() / ".pm-trader" / "default"
 
@@ -184,6 +185,24 @@ def get_tags() -> str:
         engine = _get_engine()
         tags = engine.api.get_tags()
         return _ok(tags)
+    except Exception as e:
+        return _err_from(e)
+
+
+@mcp.tool()
+def get_macro_release_calendar(
+    currency: str = "usd",
+    limit: int = 20,
+    min_tier: int = 2,
+) -> str:
+    """Get FXMacroData macro release events for event-driven markets."""
+    try:
+        events = get_macro_events(
+            currency=currency,
+            limit=min(limit, MAX_RESULTS),
+            min_tier=min_tier,
+        )
+        return _ok([event.__dict__ for event in events])
     except Exception as e:
         return _err_from(e)
 
